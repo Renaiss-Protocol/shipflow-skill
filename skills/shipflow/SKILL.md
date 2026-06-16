@@ -20,7 +20,7 @@ Map the user's intent → CLI command:
 | "pick the next issue" / "what should I work on" | `renaiss-shipflow issue next --json` |
 | "loop through issues and fix them" / "auto-fix issues" | **Loop mode** (see below) |
 | "I'm done with #42" / "release issue 42" | `renaiss-shipflow issue done 42` |
-| "attach a screenshot to #42" / "post test evidence" | `renaiss-shipflow issue evidence 42 --image shot.png --caption "..."` |
+| "attach a screenshot to #42" / "post test evidence" | `renaiss-shipflow issue evidence 42 --file shot.png --caption "..."` |
 | "open a PR" / "send for review" | `renaiss-shipflow pr create --json` (after committing) |
 | "merge PR 87" | `renaiss-shipflow pr merge 87` |
 | "run tests" | `renaiss-shipflow test` |
@@ -55,8 +55,8 @@ Run this cycle, one issue per iteration:
    - Use `triage.relatedFiles` / `relatedCommits` to orient before reading code.
 2. **Branch** — `git checkout -b fix/issue-<n>-<short-slug>` off the default branch. One branch per issue; never pile fixes onto one branch.
 3. **Fix** — investigate and make the change. If it turns out too risky, ambiguous, or you can't reproduce it: `renaiss-shipflow issue done <n> --reason "blocked: <why>"` to release the claim, then continue to the next issue (do not open a PR).
-4. **Test** — run the project's tests. For UI/behavior changes, drive the app in the browser (the `/browse` headed browser) and capture a **screenshot** (or short video) of the fix working. Only proceed if it actually verifies.
-5. **Evidence** — post the proof to the issue: `renaiss-shipflow issue evidence <n> --image <screenshot> --caption "Verified: <what you tested>"`. This lands as a GitHub issue comment + the reporter's chat thread.
+4. **Test** — run the project's tests. For UI/behavior changes, drive the app in the browser (the `/browse` headed browser) and capture a **screenshot or short video** of the fix working. Only proceed if it actually verifies.
+5. **Evidence** — post the proof to the issue: `renaiss-shipflow issue evidence <n> --file <screenshot-or-video> --caption "Verified: <what you tested>"`. This lands as a GitHub issue comment + the reporter's chat thread.
 6. **PR** — commit, push the branch, then `renaiss-shipflow pr create --json`. Reference the issue in the body (`Fixes #<n>`).
 7. **Release** — `renaiss-shipflow issue done <n> --reason "PR #<pr> opened"` so the claim frees up and the loop can advance.
 8. **Repeat** from step 1.
