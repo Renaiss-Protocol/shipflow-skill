@@ -1,0 +1,7 @@
+{
+  "name": "shipflow",
+  "version": "0.1.0",
+  "description": "Talk to ShipFlow from Claude Code via the renaiss-shipflow CLI — issues, PRs, releases, regression, status.",
+  "author": { "name": "Renaiss Protocol" },
+  "homepage": "https://renaiss-shipflow.zeabur.app/tools/claude-cli"
+}
