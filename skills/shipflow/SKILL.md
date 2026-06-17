@@ -1,15 +1,21 @@
 ---
 name: shipflow
-description: Use when the user mentions ShipFlow, an issue/PR they want to work on, opening a PR, merging a PR, cutting a release, running regression tests, or asks about their project status — invokes the `renaiss-shipflow` CLI which signals ShipFlow and uses gh for GitHub writes.
+description: Drive ShipFlow from Claude Code via the `renaiss-shipflow` CLI, which signals ShipFlow (Discord, the dashboard, teammates) and uses gh for GitHub writes. Use when the user mentions ShipFlow, or wants to check project status / what to work on, list or file issues, pick up / claim / release an issue, attach test evidence (screenshot or video) to an issue, autonomously loop through and fix issues, open or merge a PR, run tests or regression, cut a release, or sign in.
 ---
 
 # ShipFlow
 
-This skill lets you talk to ShipFlow from Claude Code via the `renaiss-shipflow` CLI. ShipFlow is a human-in-the-loop communication layer: every command's value is the side-effect signaled to ShipFlow (and through it to Discord, the dashboard, and teammates), not the local action itself.
+ShipFlow is a human-in-the-loop communication layer. Each command's value is the
+side-effect signaled to ShipFlow — and through it to Discord, the dashboard, and
+teammates — not the local action itself. Run commands via the `renaiss-shipflow`
+CLI.
 
-## When to invoke
+Each action below also has a dedicated slash command, `/shipflow-<action>` (e.g.
+`/shipflow-loop`, `/shipflow-status`, `/shipflow-pr`). Prefer the matching
+command when the user types one; use this skill to route natural-language
+requests to the same CLI calls.
 
-Map the user's intent → CLI command:
+## Intent → command
 
 | If the user says... | Run |
 |---|---|
@@ -18,7 +24,7 @@ Map the user's intent → CLI command:
 | "open an issue about X" / "file an issue" | `renaiss-shipflow issue create --title "X" --body "..."` |
 | "let me work on issue 42" / "pick up #42" | `renaiss-shipflow issue work 42 --json` |
 | "pick the next issue" / "what should I work on" | `renaiss-shipflow issue next --json` |
-| "loop through issues and fix them" / "auto-fix issues" | **Loop mode** (see below) |
+| "loop through issues and fix them" / "auto-fix issues" / `/shipflow-loop` | Loop mode — read `references/loop-mode.md` |
 | "I'm done with #42" / "release issue 42" | `renaiss-shipflow issue done 42` |
 | "attach a screenshot to #42" / "post test evidence" | `renaiss-shipflow issue evidence 42 --file shot.png --caption "..."` |
 | "open a PR" / "send for review" | `renaiss-shipflow pr create --json` (after committing) |
@@ -30,47 +36,34 @@ Map the user's intent → CLI command:
 
 ## Output handling
 
-- Always pass `--json` when the command supports it. Parse the JSON result; do NOT regex-scrape prose.
-- Show ShipFlow context (`triage` payload from `issue work`) to the user verbatim. It's the unique value of using ShipFlow over plain `gh`.
-- If a signal POST fails (warning printed to stderr), the GitHub-side action still succeeded. Mention the warning, don't retry.
+- Pass `--json` whenever the command supports it, and parse the JSON. Never
+  regex-scrape prose.
+- Show the `triage` payload from `issue work` to the user verbatim — it's the
+  unique value of ShipFlow over plain `gh`.
+- A failed signal POST (warning on stderr) still means the GitHub-side action
+  succeeded. Mention the warning; do not retry.
 
-## What NOT to do
+## Guardrails
 
-- Do NOT auto-create a branch when the user runs `issue work`. The user (or another skill the user invokes) decides branching.
-- Do NOT auto-write plan files, commit messages, or any local files based on `issue work` output. Show the context and ask the user how they want to proceed.
-- Do NOT call `renaiss-shipflow release` without explicit user confirmation. Releases trigger downstream workflows visible to the whole team.
-- Do NOT call `renaiss-shipflow pr merge` without explicit user confirmation.
+- Do NOT auto-create a branch on `issue work` — the user (or a skill they invoke)
+  decides branching.
+- Do NOT auto-write plan files, commit messages, or other local files from
+  `issue work` output. Show the context and ask how to proceed.
+- Do NOT run `renaiss-shipflow release` or `renaiss-shipflow pr merge` without
+  explicit user confirmation — both trigger team-visible downstream workflows.
 
-## Loop mode (autonomous issue-fixing)
+These guardrails are deliberately overridden inside Loop mode (see below), which
+the user opts into explicitly.
 
-Invoke **only** when the user explicitly asks to loop/auto-fix issues (e.g. "loop
-through the issues and fix them"). In this mode the "Do NOT auto-branch / auto-fix"
-rules above are overridden — auto-branching and fixing *is* the requested intent.
+## Loop mode
 
-Run this cycle, one issue per iteration:
-
-1. **Pick** — `renaiss-shipflow issue next --json` (optionally `--label bug` or
-   `--assignee <me>`). It claims the issue exclusively and returns `{issue, triage}`.
-   - **Exit code 4** (or `issue: null`) → no actionable issues remain. **Stop the loop** and summarize what you shipped.
-   - Use `triage.relatedFiles` / `relatedCommits` to orient before reading code.
-2. **Branch** — `git checkout -b fix/issue-<n>-<short-slug>` off the default branch. One branch per issue; never pile fixes onto one branch.
-3. **Fix** — investigate and make the change. If it turns out too risky, ambiguous, or you can't reproduce it: `renaiss-shipflow issue done <n> --reason "blocked: <why>"` to release the claim, then continue to the next issue (do not open a PR).
-4. **Test** — run the project's tests. For UI/behavior changes, drive the app in the browser (the `/browse` headed browser) and capture a **screenshot or short video** of the fix working. Only proceed if it actually verifies.
-5. **Evidence** — post the proof to the issue: `renaiss-shipflow issue evidence <n> --file <screenshot-or-video> --caption "Verified: <what you tested>"`. This lands as a GitHub issue comment + the reporter's chat thread.
-6. **PR** — commit, push the branch, then `renaiss-shipflow pr create --json`. Reference the issue in the body (`Fixes #<n>`).
-7. **Release** — `renaiss-shipflow issue done <n> --reason "PR #<pr> opened"` so the claim frees up and the loop can advance.
-8. **Repeat** from step 1.
-
-Loop guardrails:
-- **Never** `pr merge` or `release` (a version release) inside the loop — those need explicit human confirmation each time.
-- Cap iterations: default to a reasonable batch (e.g. 5) or until `issue next` exits 4, whichever comes first. Ask the user before going beyond.
-- Each iteration is independent: a failed/blocked issue releases its claim and the loop moves on — it never blocks the whole run.
-- If tests or the browser check fail and you can't fix them, do not open a PR for that issue; release it as blocked and continue.
+When the user explicitly asks to loop through and fix issues autonomously, read
+`references/loop-mode.md` and follow that cycle (pick → branch → fix → test →
+evidence → PR → release → repeat).
 
 ## First run
 
-If `renaiss-shipflow login` has never been run on this machine, any other command will exit non-zero with "Not signed in." Run `renaiss-shipflow login` first; it will:
-1. Check `gh auth status`. If not signed in, run `gh auth login` interactively.
-2. Read `gh auth token`.
-3. Exchange it for a ShipFlow JWT.
-4. Cache the JWT in `~/.config/renaissshipflow/credentials.json`.
+Any command exits non-zero with "Not signed in." until `renaiss-shipflow login`
+has run on the machine. `login` checks `gh auth status` (running `gh auth login`
+interactively if needed), reads `gh auth token`, exchanges it for a ShipFlow JWT,
+and caches it in `~/.config/renaissshipflow/credentials.json`.
