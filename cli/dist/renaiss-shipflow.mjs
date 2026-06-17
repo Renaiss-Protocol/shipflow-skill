@@ -2762,6 +2762,22 @@ function ghPRMerge(repo, number, mode = "squash", deleteBranch = true) {
   const parsed = JSON.parse(view);
   return { mergedSha: parsed.mergeCommit?.oid ?? "" };
 }
+var PR_FIELDS = "number,title,headRefName,url,isDraft,reviewDecision,reviews,comments,statusCheckRollup,closingIssuesReferences,updatedAt";
+function ghPRListMine(repo, limit = 30) {
+  const out = _exec(`gh pr list --repo ${shellQuote(repo)} --author @me --state open --limit ${limit} --json ${PR_FIELDS}`).toString();
+  return JSON.parse(out);
+}
+function ghCurrentLogin() {
+  try {
+    return _exec("gh api user --jq .login").toString().trim();
+  } catch {
+    return "";
+  }
+}
+function ghIssueListByLabel(repo, label, limit = 30) {
+  const out = _exec(`gh issue list --repo ${shellQuote(repo)} --state open --label ${shellQuote(label)} --limit ${limit} --json ${FIELDS},comments`).toString();
+  return JSON.parse(out);
+}
 function shellQuote(s) {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
@@ -3177,6 +3193,80 @@ async function readStdin() {
   return Buffer.concat(chunks).toString("utf-8");
 }
 
+// src/commands/inbox.ts
+var IN_PROGRESS_LABEL = "\uD83E\uDD16 in-progress";
+var FAILING = new Set(["FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "ERROR", "STARTUP_FAILURE"]);
+function prAttentionReasons(pr, me) {
+  const reasons = [];
+  if (pr.reviewDecision === "CHANGES_REQUESTED")
+    reasons.push("changes_requested");
+  const failing = (pr.statusCheckRollup ?? []).some((c) => FAILING.has((c.conclusion ?? "").toUpperCase()) || FAILING.has((c.state ?? "").toUpperCase()));
+  if (failing)
+    reasons.push("ci_failing");
+  const fromOthers = (a) => !!a.author && a.author.login !== me;
+  const reviewFeedback = (pr.reviews ?? []).filter((r) => fromOthers(r) && (r.state === "CHANGES_REQUESTED" || r.state === "COMMENTED"));
+  const otherComments = (pr.comments ?? []).filter(fromOthers);
+  if (reviewFeedback.length || otherComments.length)
+    reasons.push("review_comments");
+  return reasons;
+}
+function issueNeedsReply(comments, me) {
+  if (!comments?.length)
+    return null;
+  const last = comments[comments.length - 1];
+  return last.author && last.author.login !== me ? last : null;
+}
+function registerInboxCommand(program2) {
+  program2.command("inbox").description("Open PRs (review feedback / failing CI) and in-progress issues (new comments) needing follow-up before new work").option("--repo <fullname>", "Override target repo").option("--json", "Output JSON").action(async (opts) => {
+    const auth = resolveAuthToken();
+    const creds = loadCredentials();
+    if (!auth || !creds) {
+      console.error("Not signed in. Run: renaiss-shipflow login");
+      process.exit(1);
+    }
+    const client = new ShipFlowClient({ baseUrl: resolveApiUrl(program2.opts().apiUrl), jwt: auth.token });
+    const project = await resolveProject(client, creds);
+    const repo = opts.repo ?? project.repoFullName;
+    const me = ghCurrentLogin();
+    const prs = ghPRListMine(repo).map((pr) => {
+      const reasons = prAttentionReasons(pr, me);
+      return {
+        number: pr.number,
+        title: pr.title,
+        branch: pr.headRefName,
+        url: pr.url,
+        draft: pr.isDraft,
+        reviewDecision: pr.reviewDecision || "none",
+        closesIssues: (pr.closingIssuesReferences ?? []).map((i) => i.number),
+        needsAttention: reasons.length > 0,
+        reasons
+      };
+    });
+    const issues = ghIssueListByLabel(repo, IN_PROGRESS_LABEL).map((i) => {
+      const reply = issueNeedsReply(i.comments ?? [], me);
+      return {
+        number: i.number,
+        title: i.title,
+        url: i.url,
+        newComment: reply ? { author: reply.author?.login, at: reply.createdAt } : null,
+        needsAttention: !!reply
+      };
+    });
+    const prAttn = prs.filter((p) => p.needsAttention).length;
+    const issueAttn = issues.filter((i) => i.needsAttention).length;
+    if (opts.json) {
+      console.log(JSON.stringify({ repo, prs, issues, summary: { prsNeedingAttention: prAttn, issuesNeedingAttention: issueAttn } }, null, 2));
+      return;
+    }
+    console.log(`\uD83D\uDCE5 Inbox for ${repo}`);
+    console.log(`Open PRs: ${prs.length} (${prAttn} need attention) · in-progress issues: ${issues.length} (${issueAttn} with new comments)`);
+    for (const p of prs)
+      console.log(`  ${p.needsAttention ? "⚠️ " : "✓ "}PR #${p.number} — ${p.title}  [${p.reasons.join(", ") || "ok"}]`);
+    for (const i of issues)
+      console.log(`  ${i.needsAttention ? "\uD83D\uDCAC " : "✓ "}#${i.number} — ${i.title}${i.newComment ? `  (last: @${i.newComment.author})` : ""}`);
+  });
+}
+
 // src/commands/claims.ts
 function registerClaimsCommand(program2) {
   program2.command("claims").description("List active agent claims (who is working on what)").option("--json", "Output JSON").action(async (opts) => {
@@ -3397,6 +3487,7 @@ registerInitCommand(program2);
 registerStatusCommand(program2);
 registerIssuesCommand(program2);
 registerIssueCommand(program2);
+registerInboxCommand(program2);
 registerClaimsCommand(program2);
 registerPRCommand(program2);
 registerTestCommand(program2);

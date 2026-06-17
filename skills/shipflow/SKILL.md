@@ -45,6 +45,7 @@ requests to the same CLI calls.
 | "open an issue about X" / "file an issue" | `renaiss-shipflow issue create --title "X" --body "..."` |
 | "let me work on issue 42" / "pick up #42" | `renaiss-shipflow issue work 42 --json` |
 | "pick the next issue" / "what should I work on" | `renaiss-shipflow issue next --json` |
+| "what needs follow-up" / "any PR comments" / "check my open PRs" | `renaiss-shipflow inbox --json` |
 | "loop through issues and fix them" / "auto-fix issues" / `/shipflow-loop` | Loop mode — read `references/loop-mode.md` |
 | "I'm done with #42" / "release issue 42" | `renaiss-shipflow issue done 42` |
 | "attach a screenshot to #42" / "post test evidence" | `renaiss-shipflow issue evidence 42 --file shot.png --caption "..."` |
