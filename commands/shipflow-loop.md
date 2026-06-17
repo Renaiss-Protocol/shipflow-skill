@@ -5,6 +5,11 @@ description: Run the ShipFlow autonomous issue-fixing loop (reconcile → pick �
 Enter ShipFlow **Loop mode**: autonomously work items one at a time. In this mode
 the usual "don't auto-branch / auto-fix" guardrails are intentionally lifted.
 
+**Arguments** (`$ARGUMENTS`): a `cap=N` token sets how many PRs to open before
+pausing (`cap=all` drains the whole queue); anything else is an `issue next`
+filter (e.g. `--label bug`). If no `cap=` is given, use `$SHIPFLOW_LOOP_CAP` if
+set, else **5**.
+
 Run this cycle, one item per iteration:
 
 1. **Reconcile open work first** — run `renaiss-shipflow inbox --json`. For each PR
@@ -14,7 +19,8 @@ Run this cycle, one item per iteration:
    a `newComment`: read (`gh issue view <n> --comments`) and act on it. Only move on
    once the inbox is clear.
 2. **Pick** — `renaiss-shipflow issue next --json` (claims the next open, unclaimed
-   issue, ordered priority → severity → newest). Optional filters: $ARGUMENTS.
+   issue, ordered priority → severity → newest). Pass the non-`cap=` parts of the
+   arguments as filters.
    Exit code 4 / `issue: null` → nothing actionable remains: **stop** and summarize
    what shipped. Use the returned `triage.relatedFiles`/`relatedCommits` to orient.
 3. **Branch** — `git checkout -b fix/issue-<n>-<slug>` off the default branch.
@@ -37,7 +43,8 @@ Run this cycle, one item per iteration:
    PR you just opened.
 
 **Run to the cap — don't stop early to ask.** Keep cycling until you've opened
-`cap` PRs (default **5**) **or** step 2 returns no actionable issue. A blocked
+`cap` PRs (the `cap=N` arg, else `$SHIPFLOW_LOOP_CAP`, else **5**; `cap=all` =
+drain the queue) **or** step 2 returns no actionable issue. A blocked
 issue is skipped (claim held) and the loop moves on; it never ends the run and you
 never pause mid-run to ask for direction. Only at the cap or an empty queue:
 release any held blocked claims, summarize (PRs opened + blocked w/ reasons), and

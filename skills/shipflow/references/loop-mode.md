@@ -58,8 +58,10 @@ Run this cycle, one item per iteration:
 - Reconcile (step 1) handles your own PRs and claimed issues. Don't act on PRs or
   issues authored by other people without being asked.
 - **Run to the cap — do not stop early to ask.** Keep cycling (pick → … → PR)
-  until you have opened `cap` PRs (default **5**) **or** step 2 returns no
-  actionable issue. A single hard / blocked / unverifiable issue is skipped
+  until you have opened `cap` PRs **or** step 2 returns no actionable issue. The
+  cap is, in order of precedence: a `cap=N` token the user passed (`cap=all`
+  drains the whole queue), else the `SHIPFLOW_LOOP_CAP` env var, else **5**. The
+  user can also just say it in plain language ("do up to 10", "no cap"). A single hard / blocked / unverifiable issue is skipped
   (step 4, claim held) and the loop moves on — it never ends the run, and you
   never pause mid-run to ask the user for direction or permission.
 - Because blocked issues keep their claim, step 2 naturally advances **down the
