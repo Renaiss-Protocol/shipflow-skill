@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Resolve a headed browser CLI for end-to-end loop testing, preferring gstack's
+# `browse` (the sanctioned browser). Prints the command to invoke on stdout, or
+# guidance on stderr + exit 1 when none is found.
+#
+#   BROWSE="$(shipflow-browser)" || { echo "$BROWSE"; }   # $BROWSE is the cmd
+set -euo pipefail
+
+if command -v browse >/dev/null 2>&1; then echo "browse"; exit 0; fi
+for p in \
+  "$HOME/.claude/skills/gstack/browse/dist/browse" \
+  "$HOME/.claude/skills/gstack/browse/bin/browse" \
+  "./.claude/skills/gstack/browse/dist/browse"; do
+  [ -x "$p" ] && { echo "$p"; exit 0; }
+done
+
+echo "No headed browser found. Install gstack (provides 'browse'), or drive the app with your project's own E2E runner (Playwright/Cypress) and still capture a screenshot for evidence." >&2
+exit 1

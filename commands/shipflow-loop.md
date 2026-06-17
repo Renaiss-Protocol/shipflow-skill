@@ -21,8 +21,12 @@ Run this cycle, one item per iteration:
 4. **Fix** — investigate and make the change. If too risky/ambiguous or you can't
    reproduce it: `renaiss-shipflow issue done <n> --reason "blocked: <why>"` and go
    to the next issue (no PR).
-5. **Test** — run the project's tests; for UI/behavior changes drive the app in a
-   browser and capture a screenshot/short video. Only proceed if it verifies.
+5. **Test** — run the project's tests; for any UI/behavior change verify
+   **end-to-end in a real browser** (resolve it via the plugin's
+   `bin/shipflow-browser`, preferring gstack `browse`): `goto` the app, exercise
+   the fix, confirm with `snapshot -D` + no new console errors, and capture
+   before/after **screenshots** (Read them so they're visible). Only proceed if it
+   genuinely verifies — never open a PR for an unverified fix.
 6. **Evidence** — `renaiss-shipflow issue evidence <n> --file <shot-or-video>
    --caption "Verified: <what you tested>"`.
 7. **PR** — commit, push, then `renaiss-shipflow pr create --json` (body `Fixes #<n>`).

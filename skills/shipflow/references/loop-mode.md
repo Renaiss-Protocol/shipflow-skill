@@ -28,12 +28,18 @@ Run this cycle, one item per iteration:
 4. **Fix** — investigate and make the change. If it turns out too risky,
    ambiguous, or you can't reproduce it: `renaiss-shipflow issue done <n>
    --reason "blocked: <why>"` to release the claim, then continue (no PR).
-5. **Test** — run the project's tests. For UI/behavior changes, drive the app in
-   the browser (the `/browse` headed browser) and capture a **screenshot or short
-   video** of the fix working. Only proceed if it actually verifies.
-6. **Evidence** — `renaiss-shipflow issue evidence <n> --file <shot-or-video>
-   --caption "Verified: <what you tested>"`. Lands as a GitHub issue comment + the
-   reporter's chat thread.
+5. **Test** — run the project's tests, then **verify end-to-end in a real
+   browser** for any UI/behavior change: follow `references/browser-testing.md`
+   (resolve the browser via `bin/shipflow-browser`, reuse the headed session,
+   drive the fix, confirm with a `snapshot -D` diff + no new console errors, and
+   capture before/after **screenshots**). Read the screenshots so they're visible.
+   Only proceed if it genuinely verifies — otherwise fix it or release as blocked,
+   never open a PR for an unverified fix. Pure backend/library changes can verify
+   with the project's tests alone.
+6. **Evidence** — attach the screenshot(s)/recording captured in step 5:
+   `renaiss-shipflow issue evidence <n> --file <shot-or-video> --caption "Verified:
+   <what you tested>"`. Lands as a GitHub issue comment + the reporter's chat
+   thread.
 7. **PR** — commit, push the branch, then `renaiss-shipflow pr create --json`
    (body `Fixes #<n>`).
 8. **Release** — `renaiss-shipflow issue done <n> --reason "PR #<pr> opened"` so
