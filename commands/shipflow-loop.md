@@ -18,9 +18,11 @@ Run this cycle, one item per iteration:
    Exit code 4 / `issue: null` → nothing actionable remains: **stop** and summarize
    what shipped. Use the returned `triage.relatedFiles`/`relatedCommits` to orient.
 3. **Branch** — `git checkout -b fix/issue-<n>-<slug>` off the default branch.
-4. **Fix** — investigate and make the change. If too risky/ambiguous or you can't
-   reproduce it: `renaiss-shipflow issue done <n> --reason "blocked: <why>"` and go
-   to the next issue (no PR).
+4. **Fix** — investigate and make the change. Genuinely try to verify (start the
+   dev server / seed a test DB). Only if it's truly too risky/ambiguous,
+   unreproducible, or unverifiable: **keep the claim** (so step 2 skips it next
+   time), note it as blocked, and continue to the next iteration — no PR, and
+   **do not stop the loop**.
 5. **Test** — run the project's tests; for any UI/behavior change verify
    **end-to-end in a real browser** (resolve it via the plugin's
    `bin/shipflow-browser`, preferring gstack `browse`): `goto` the app, exercise
@@ -34,6 +36,10 @@ Run this cycle, one item per iteration:
 9. **Repeat** from step 1 — the next reconcile picks up any review that lands on the
    PR you just opened.
 
-**Never** `pr merge` or cut a `release` inside the loop without explicit
-confirmation. Cap iterations at a reasonable batch (default ~5) or until step 2
-exits 4; ask before going beyond.
+**Run to the cap — don't stop early to ask.** Keep cycling until you've opened
+`cap` PRs (default **5**) **or** step 2 returns no actionable issue. A blocked
+issue is skipped (claim held) and the loop moves on; it never ends the run and you
+never pause mid-run to ask for direction. Only at the cap or an empty queue:
+release any held blocked claims, summarize (PRs opened + blocked w/ reasons), and
+ask whether to continue beyond the cap. **Never** `pr merge` / `release` without
+explicit confirmation.

@@ -25,9 +25,13 @@ Run this cycle, one item per iteration:
    - Use `triage.relatedFiles` / `relatedCommits` to orient before reading code.
 3. **Branch** — `git checkout -b fix/issue-<n>-<short-slug>` off the default
    branch. One branch per issue; never pile fixes onto one branch.
-4. **Fix** — investigate and make the change. If it turns out too risky,
-   ambiguous, or you can't reproduce it: `renaiss-shipflow issue done <n>
-   --reason "blocked: <why>"` to release the claim, then continue (no PR).
+4. **Fix** — investigate and make the change. Make a genuine attempt to verify —
+   start the dev server, seed a local/test DB, stand up what you need;
+   environmental friction is **not** a reason to abandon. Only if it's truly too
+   risky, ambiguous, unreproducible, or impossible to verify here: **keep the
+   claim** (do not release it yet — the held claim makes step 2 skip it next
+   time), record it as blocked with the reason, and **continue to the next
+   iteration**. Do not open a PR for it, and do **not** stop the loop.
 5. **Test** — run the project's tests, then **verify end-to-end in a real
    browser** for any UI/behavior change: follow `references/browser-testing.md`
    (resolve the browser via `bin/shipflow-browser`, reuse the headed session,
@@ -53,9 +57,19 @@ Run this cycle, one item per iteration:
   human confirmation each time.
 - Reconcile (step 1) handles your own PRs and claimed issues. Don't act on PRs or
   issues authored by other people without being asked.
-- Cap iterations: default to a reasonable batch (e.g. 5) or until step 2 exits 4,
-  whichever comes first. Ask the user before going beyond.
-- Each iteration is independent: a failed/blocked issue releases its claim and the
-  loop moves on — it never blocks the whole run.
-- If tests or the browser check fail and you can't fix them, do not open a PR for
-  that issue; release it as blocked and continue.
+- **Run to the cap — do not stop early to ask.** Keep cycling (pick → … → PR)
+  until you have opened `cap` PRs (default **5**) **or** step 2 returns no
+  actionable issue. A single hard / blocked / unverifiable issue is skipped
+  (step 4, claim held) and the loop moves on — it never ends the run, and you
+  never pause mid-run to ask the user for direction or permission.
+- Because blocked issues keep their claim, step 2 naturally advances **down the
+  priority list** to the next workable issue. When step 2 finally returns null,
+  every remaining issue is either shipped or blocked-by-you — that's the stop.
+- An unverified fix is never shipped: if the browser/test check fails and you
+  can't fix it, treat the issue as blocked (skip + continue) — not as a reason to
+  halt the loop.
+- **Only at the cap or an empty queue:** release any held blocked claims
+  (`renaiss-shipflow issue done <n> --reason "blocked: <why>"`), then summarize —
+  PRs opened, and issues blocked with reasons — and ask whether to continue beyond
+  the cap or to merge anything. `pr merge` / `release` still need explicit
+  confirmation.
