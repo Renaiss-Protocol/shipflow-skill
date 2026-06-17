@@ -5,7 +5,22 @@ issues (e.g. "loop through the issues and fix them", "auto-fix issues"). In this
 mode the skill's "Do NOT auto-branch / auto-fix" guardrails are overridden —
 auto-branching and fixing *is* the requested intent.
 
-Run this cycle, one item per iteration:
+## Setup — run in a worktree (once, before the cycle)
+
+The loop **always** works in a git worktree, never in the user's live checkout,
+so they can keep working while it runs. Use a **single** worktree, reused for
+every iteration (not one per issue):
+
+- Prefer the `EnterWorktree` tool with a fixed name (`shipflow-loop`); it creates
+  the worktree off the default branch and switches the session into it. Fall back
+  to `git worktree add .worktrees/shipflow-loop -b shipflow-loop/base origin/<default>`
+  (ensure `.worktrees/` is gitignored) and `cd` into it.
+- If already in that worktree (resuming), reuse it — don't create another.
+- All branching, fixing, testing, committing, and pushing happen inside this one
+  worktree. At the end of the run, surface its path + branch; clean it up only
+  after the PRs merge.
+
+Run this cycle, one item per iteration (all inside the loop worktree):
 
 1. **Reconcile open work first** — before picking anything new, run
    `renaiss-shipflow inbox --json` and clear it:
@@ -23,8 +38,10 @@ Run this cycle, one item per iteration:
    - **Exit code 4** / `issue: null` → no actionable issues remain. **Stop the
      loop** and summarize what you shipped.
    - Use `triage.relatedFiles` / `relatedCommits` to orient before reading code.
-3. **Branch** — `git checkout -b fix/issue-<n>-<short-slug>` off the default
-   branch. One branch per issue; never pile fixes onto one branch.
+3. **Branch** — inside the loop worktree, base each issue's branch on the latest
+   default branch: `git fetch origin && git checkout -b fix/issue-<n>-<short-slug>
+   origin/<default>`. One branch per issue; never pile fixes onto one branch. (The
+   worktree is reused; only the branch changes per issue.)
 4. **Fix** — investigate and make the change. Make a genuine attempt to verify —
    start the dev server, seed a local/test DB, stand up what you need;
    environmental friction is **not** a reason to abandon. Only if it's truly too

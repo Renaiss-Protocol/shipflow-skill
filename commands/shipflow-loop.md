@@ -10,7 +10,13 @@ pausing (`cap=all` drains the whole queue); anything else is an `issue next`
 filter (e.g. `--label bug`). If no `cap=` is given, use `$SHIPFLOW_LOOP_CAP` if
 set, else **5**.
 
-Run this cycle, one item per iteration:
+**Setup — work in a single worktree.** Before the cycle, move into one reusable
+git worktree (never the user's live checkout) so they can keep working: prefer the
+`EnterWorktree` tool with the name `shipflow-loop`, else `git worktree add
+.worktrees/shipflow-loop -b shipflow-loop/base origin/<default>` and `cd` in.
+Reuse it if it already exists; one worktree for the whole run, not one per issue.
+
+Run this cycle, one item per iteration (all inside that worktree):
 
 1. **Reconcile open work first** — run `renaiss-shipflow inbox --json`. For each PR
    with `needsAttention` (changes_requested / ci_failing / review_comments): read
@@ -23,7 +29,8 @@ Run this cycle, one item per iteration:
    arguments as filters.
    Exit code 4 / `issue: null` → nothing actionable remains: **stop** and summarize
    what shipped. Use the returned `triage.relatedFiles`/`relatedCommits` to orient.
-3. **Branch** — `git checkout -b fix/issue-<n>-<slug>` off the default branch.
+3. **Branch** — inside the loop worktree: `git fetch origin && git checkout -b
+   fix/issue-<n>-<slug> origin/<default>` (worktree reused; only the branch changes).
 4. **Fix** — investigate and make the change. Genuinely try to verify (start the
    dev server / seed a test DB). Only if it's truly too risky/ambiguous,
    unreproducible, or unverifiable: **keep the claim** (so step 2 skips it next
