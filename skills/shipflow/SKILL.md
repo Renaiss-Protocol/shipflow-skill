@@ -5,10 +5,31 @@ description: Drive ShipFlow from Claude Code via the `renaiss-shipflow` CLI, whi
 
 # ShipFlow
 
+## Preamble (run first)
+
+Self-update check + ensure the bundled CLI is runnable (cached; ~no overhead):
+
+```bash
+PLUGIN_DIR=$(ls -d ~/.claude/plugins/cache/renaissshipflow/shipflow/*/ 2>/dev/null | sort -V | tail -1)
+# The CLI ships inside the plugin — link it onto PATH (next to node, which is
+# already on PATH) so no separate `npm i -g` is needed. Skips if a global
+# renaiss-shipflow already exists.
+if [ -n "$PLUGIN_DIR" ] && ! command -v renaiss-shipflow >/dev/null 2>&1; then
+  _ND=$(dirname "$(command -v node 2>/dev/null)" 2>/dev/null)
+  [ -n "$_ND" ] && ln -sf "$PLUGIN_DIR/bin/renaiss-shipflow" "$_ND/renaiss-shipflow" 2>/dev/null || true
+fi
+[ -n "$PLUGIN_DIR" ] && "$PLUGIN_DIR/bin/shipflow-update-check" 2>/dev/null || true
+```
+
+- If the check prints `UPGRADE_AVAILABLE <old> <new>` and `SHIPFLOW_AUTO_UPDATE`
+  is not `false`: follow `references/auto-update.md` to update now, then continue
+  with the user's request.
+- Otherwise (no output): proceed normally.
+
 ShipFlow is a human-in-the-loop communication layer. Each command's value is the
 side-effect signaled to ShipFlow — and through it to Discord, the dashboard, and
 teammates — not the local action itself. Run commands via the `renaiss-shipflow`
-CLI.
+CLI (bundled with this plugin — no separate install required).
 
 Each action below also has a dedicated slash command, `/shipflow-<action>` (e.g.
 `/shipflow-loop`, `/shipflow-status`, `/shipflow-pr`). Prefer the matching

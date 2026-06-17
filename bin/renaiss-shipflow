@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Bundled ShipFlow CLI launcher — ships inside the plugin, so users don't need a
+# separate `npm i -g @renaiss-shipflow/cli`. Requires node, gh, and git on PATH.
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec node "$DIR/../cli/dist/renaiss-shipflow.mjs" "$@"

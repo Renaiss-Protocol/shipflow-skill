@@ -1,7 +1,7 @@
 {
   "name": "shipflow",
-  "version": "0.2.0",
-  "description": "Talk to ShipFlow from Claude Code via the renaiss-shipflow CLI — dedicated /shipflow-* commands (loop, status, issues, PRs, releases, regression) plus a natural-language skill.",
+  "version": "0.3.0",
+  "description": "ShipFlow for Claude Code: dedicated /shipflow-* commands (loop, status, issues, PRs, releases) plus a natural-language skill. Bundles the renaiss-shipflow CLI (no separate install) and self-updates on use.",
   "author": { "name": "Renaiss Protocol" },
   "homepage": "https://renaiss-shipflow.zeabur.app/tools/claude-cli"
 }
