@@ -13,23 +13,33 @@ continues).
    claude plugin update shipflow@renaissshipflow >/dev/null 2>&1 || true
    ```
 2. Tell the user, concisely:
-   `⬆️ ShipFlow updated v{old} → v{new}. Run /reload-plugins to apply it now (or it loads on next restart).`
+   `⬆️ ShipFlow updated v{old} → v{new} — it loads automatically next session, or run /reload-plugins to apply it now.`
 3. **Continue with the user's original request.** Never block on the update.
 
-## Why the skill can't apply it for you
+## How updates apply (no manual action needed)
 
-Claude Code only has a `claude plugin update` CLI (which **installs** to disk but
-says "restart required") — there is **no** command, hook, or API for a skill to
-reload plugins into the *running* session. `/reload-plugins` is the only
-in-session apply and it's a **manual user action** the assistant cannot self-type.
-So the best the auto-update can do is install silently and point the user at
-`/reload-plugins`.
+A **SessionStart hook** (`hooks/hooks.json` → `bin/shipflow-session-start`)
+silently installs any pending update at the start of each session. Combined with
+this preamble, updates get installed proactively — you don't run anything — and
+load **automatically on your next session**.
 
-Good news — most updates need **no** reload: the `renaiss-shipflow` **CLI is
-bundled and re-resolved from disk on the next skill run** (the preamble symlinks
-the newest version), so CLI behavior (commands, ordering, inbox, config) updates
-**live**. A reload/restart is only needed to pick up **new or changed skill files**
-— added slash commands, edited loop steps, reference docs.
+## Why the skill can't apply it *this* session
+
+Claude Code **pins the plugin version at session start, before hooks run**, so a
+freshly-installed version can't take effect in the current session — no command,
+`reloadSkills`, hook, or API can swap the loaded plugin version mid-session
+(verified against the docs). The only ways an installed update goes live:
+
+- **Automatically** — at the next session start (the SessionStart hook already
+  installed it, so it just loads). No user action.
+- **Immediately** — the user runs **`/reload-plugins`** (a manual command; the
+  assistant cannot self-type it).
+
+Most behavior needs **no** reload anyway: the `renaiss-shipflow` **CLI is bundled
+and re-resolved from disk on each skill run** (the preamble symlinks the newest
+version), so CLI behavior (commands, ordering, inbox, config) updates **live**. A
+reload is only for **new/changed skill files** — added slash commands, edited
+loop steps, reference docs.
 
 If `claude plugin update` is unavailable or errors, tell the user to run
 `/shipflow-update` (or `claude plugin update shipflow@renaissshipflow`) manually,
