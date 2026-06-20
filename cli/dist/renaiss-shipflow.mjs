@@ -2124,6 +2124,12 @@ var clearConfig = () => {
 };
 var loadCredentials = () => readJsonOr(CREDS_FILE, null);
 var saveCredentials = (c) => writeJson(CREDS_FILE, c);
+function refreshOpts(creds) {
+  return {
+    refreshToken: creds.refreshToken,
+    onRefreshed: (t) => saveCredentials({ ...creds, jwt: t.token, refreshToken: t.refreshToken, expiresAt: t.expiresAt })
+  };
+}
 var loadProjectCache = () => readJsonOr(PROJECTS_FILE, {});
 var saveProjectCache = (c) => writeJson(PROJECTS_FILE, c);
 function projectCacheKeyForRepoPath(absRepoRoot) {
@@ -2221,22 +2227,27 @@ class ClaimConflictError extends Error {
 class ShipFlowClient {
   baseUrl;
   apiKey;
+  refreshToken;
+  onRefreshed;
+  fetchImpl;
   constructor(opts) {
     this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
     this.apiKey = opts.jwt || opts.apiKey;
+    this.refreshToken = opts.refreshToken;
+    this.onRefreshed = opts.onRefreshed;
+    this.fetchImpl = opts.fetch ?? fetch;
   }
-  async request(method, path, body) {
-    const headers = {
-      "Content-Type": "application/json"
-    };
-    if (this.apiKey) {
+  authedFetch(method, path, body) {
+    const headers = { "Content-Type": "application/json" };
+    if (this.apiKey)
       headers["Authorization"] = `Bearer ${this.apiKey}`;
-    }
-    const res = await fetch(`${this.baseUrl}${path}`, {
+    return this.fetchImpl(`${this.baseUrl}${path}`, {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined
     });
+  }
+  async toResult(res) {
     if (!res.ok) {
       const text2 = await res.text().catch(() => res.statusText);
       throw new ApiError(res.status, text2);
@@ -2245,6 +2256,36 @@ class ShipFlowClient {
     if (!text)
       return;
     return JSON.parse(text);
+  }
+  async request(method, path, body) {
+    let res = await this.authedFetch(method, path, body);
+    if (res.status === 401 && this.refreshToken && await this.tryRefresh()) {
+      res = await this.authedFetch(method, path, body);
+    }
+    return this.toResult(res);
+  }
+  async tryRefresh() {
+    const rt = this.refreshToken;
+    if (!rt)
+      return false;
+    this.refreshToken = undefined;
+    try {
+      const res = await this.fetchImpl(`${this.baseUrl}/api/v1/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken: rt })
+      });
+      if (!res.ok)
+        return false;
+      const data = JSON.parse(await res.text());
+      this.apiKey = data.token;
+      this.refreshToken = data.refreshToken;
+      const expiresAt = Math.floor(Date.now() / 1000) + 24 * 60 * 60;
+      this.onRefreshed?.({ token: data.token, refreshToken: data.refreshToken, expiresAt });
+      return true;
+    } catch {
+      return false;
+    }
   }
   async listRepos(org) {
     return this.request("GET", `/api/v1/orgs/${encodeURIComponent(org)}/repos`);
@@ -2938,7 +2979,7 @@ function registerInitCommand(program2) {
       console.error("Not in a git repo with a github.com origin remote.");
       process.exit(1);
     }
-    const client = new ShipFlowClient({ baseUrl: resolveApiUrl(program2.opts().apiUrl), jwt: auth.token });
+    const client = new ShipFlowClient({ baseUrl: resolveApiUrl(program2.opts().apiUrl), jwt: auth.token, ...refreshOpts(creds) });
     const lookup = await client.getRepoByFullName(creds.org, remote.owner, remote.repo);
     if (!lookup.projects?.length) {
       console.error(`Repo ${remote.owner}/${remote.repo} is not in any project on this org.`);
@@ -2967,7 +3008,7 @@ function registerStatusCommand(program2) {
       console.error("Not signed in. Run: renaiss-shipflow login");
       process.exit(1);
     }
-    const client = new ShipFlowClient({ baseUrl: resolveApiUrl(program2.opts().apiUrl), jwt: auth.token });
+    const client = new ShipFlowClient({ baseUrl: resolveApiUrl(program2.opts().apiUrl), jwt: auth.token, ...refreshOpts(creds) });
     const project = await resolveProject(client, creds);
     const status = await client.getProjectStatus(creds.org, project.projectId);
     if (opts.json) {
@@ -2998,7 +3039,7 @@ function registerIssuesCommand(program2) {
       console.error("Not signed in. Run: renaiss-shipflow login");
       process.exit(1);
     }
-    const client = new ShipFlowClient({ baseUrl: resolveApiUrl(program2.opts().apiUrl), jwt: auth.token });
+    const client = new ShipFlowClient({ baseUrl: resolveApiUrl(program2.opts().apiUrl), jwt: auth.token, ...refreshOpts(creds) });
     const project = await resolveProject(client, creds);
     const list = ghIssueList(project.repoFullName, opts.state, parseInt(opts.limit, 10));
     if (opts.json) {
@@ -3192,7 +3233,7 @@ async function loadCtx(program2) {
     console.error("Not signed in. Run: renaiss-shipflow login");
     process.exit(1);
   }
-  const client = new ShipFlowClient({ baseUrl: resolveApiUrl(program2.opts().apiUrl), jwt: auth.token });
+  const client = new ShipFlowClient({ baseUrl: resolveApiUrl(program2.opts().apiUrl), jwt: auth.token, ...refreshOpts(creds) });
   const project = await resolveProject(client, creds);
   return { auth, creds, client, project };
 }
@@ -3234,7 +3275,7 @@ function registerInboxCommand(program2) {
       console.error("Not signed in. Run: renaiss-shipflow login");
       process.exit(1);
     }
-    const client = new ShipFlowClient({ baseUrl: resolveApiUrl(program2.opts().apiUrl), jwt: auth.token });
+    const client = new ShipFlowClient({ baseUrl: resolveApiUrl(program2.opts().apiUrl), jwt: auth.token, ...refreshOpts(creds) });
     const project = await resolveProject(client, creds);
     const repo = opts.repo ?? project.repoFullName;
     const me = ghCurrentLogin();
@@ -3320,7 +3361,7 @@ function registerClaimsCommand(program2) {
       console.error("Not signed in. Run: renaiss-shipflow login");
       process.exit(1);
     }
-    const client = new ShipFlowClient({ baseUrl: resolveApiUrl(program2.opts().apiUrl), jwt: auth.token });
+    const client = new ShipFlowClient({ baseUrl: resolveApiUrl(program2.opts().apiUrl), jwt: auth.token, ...refreshOpts(creds) });
     const project = await resolveProject(client, creds);
     const claims = await client.listClaims(creds.org, project.projectId);
     if (opts.json) {
@@ -3391,7 +3432,7 @@ async function loadCtx2(program2) {
     console.error("Not signed in. Run: renaiss-shipflow login");
     process.exit(1);
   }
-  const client = new ShipFlowClient({ baseUrl: resolveApiUrl(program2.opts().apiUrl), jwt: auth.token });
+  const client = new ShipFlowClient({ baseUrl: resolveApiUrl(program2.opts().apiUrl), jwt: auth.token, ...refreshOpts(creds) });
   const project = await resolveProject(client, creds);
   return { auth, creds, client, project };
 }
@@ -3465,7 +3506,7 @@ function registerRegressionCommand(program2) {
       process.exit(1);
     }
     const ref = opts.ref ?? execSync4("git rev-parse HEAD").toString().trim();
-    const client = new ShipFlowClient({ baseUrl: resolveApiUrl(program2.opts().apiUrl), jwt: auth.token });
+    const client = new ShipFlowClient({ baseUrl: resolveApiUrl(program2.opts().apiUrl), jwt: auth.token, ...refreshOpts(creds) });
     const project = await resolveProject(client, creds);
     const result = await client.triggerWorkflow(creds.org, project.projectId, "test_runner", { repo: project.repoFullName, ref });
     if (opts.json) {
@@ -3486,7 +3527,7 @@ function registerReleaseCommand(program2) {
       console.error("Not signed in. Run: renaiss-shipflow login");
       process.exit(1);
     }
-    const client = new ShipFlowClient({ baseUrl: resolveApiUrl(program2.opts().apiUrl), jwt: auth.token });
+    const client = new ShipFlowClient({ baseUrl: resolveApiUrl(program2.opts().apiUrl), jwt: auth.token, ...refreshOpts(creds) });
     const project = await resolveProject(client, creds);
     const tag = opts.tag ?? await promptText("Tag (e.g. v0.7.3): ");
     const baseTag = opts.baseTag ?? safeLatestTag();
