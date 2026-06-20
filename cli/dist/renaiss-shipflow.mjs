@@ -2129,6 +2129,16 @@ var saveProjectCache = (c) => writeJson(PROJECTS_FILE, c);
 function projectCacheKeyForRepoPath(absRepoRoot) {
   return createHash("sha256").update(absRepoRoot).digest("hex").slice(0, 16);
 }
+function parseBool(v) {
+  if (v == null)
+    return false;
+  return ["true", "1", "on", "yes"].includes(v.trim().toLowerCase());
+}
+function resolveAutoIssue() {
+  if (process.env.SHIPFLOW_AUTO_ISSUE != null)
+    return parseBool(process.env.SHIPFLOW_AUTO_ISSUE);
+  return loadConfig().autoIssue === true;
+}
 function resolveApiUrl(flagUrl) {
   return flagUrl || process.env.SHIPFLOW_API_URL || loadConfig().apiUrl || "http://localhost:8080";
 }
@@ -3267,6 +3277,40 @@ function registerInboxCommand(program2) {
   });
 }
 
+// src/commands/config.ts
+var KEYS = ["auto-issue"];
+function registerConfigCommand(program2) {
+  const config = program2.command("config").description("Get/set ShipFlow CLI preferences");
+  config.command("set <key> <value>").description(`Set a preference. Keys: ${KEYS.join(", ")}`).action((key, value) => {
+    if (key === "auto-issue") {
+      const cfg = loadConfig();
+      cfg.autoIssue = parseBool(value);
+      saveConfig(cfg);
+      console.log(`auto-issue = ${cfg.autoIssue}`);
+      return;
+    }
+    console.error(`Unknown key: ${key} (supported: ${KEYS.join(", ")})`);
+    process.exit(1);
+  });
+  config.command("get <key>").description("Read a preference (env vars override stored config)").option("--json", "Output JSON").action((key, opts) => {
+    if (key === "auto-issue") {
+      const v = resolveAutoIssue();
+      console.log(opts.json ? JSON.stringify({ autoIssue: v }) : String(v));
+      return;
+    }
+    console.error(`Unknown key: ${key} (supported: ${KEYS.join(", ")})`);
+    process.exit(1);
+  });
+  config.command("list").description("Show all preferences (effective values)").option("--json", "Output JSON").action((opts) => {
+    const settings = { autoIssue: resolveAutoIssue() };
+    if (opts.json) {
+      console.log(JSON.stringify(settings, null, 2));
+      return;
+    }
+    console.log(`auto-issue: ${settings.autoIssue}`);
+  });
+}
+
 // src/commands/claims.ts
 function registerClaimsCommand(program2) {
   program2.command("claims").description("List active agent claims (who is working on what)").option("--json", "Output JSON").action(async (opts) => {
@@ -3488,6 +3532,7 @@ registerStatusCommand(program2);
 registerIssuesCommand(program2);
 registerIssueCommand(program2);
 registerInboxCommand(program2);
+registerConfigCommand(program2);
 registerClaimsCommand(program2);
 registerPRCommand(program2);
 registerTestCommand(program2);

@@ -1,6 +1,6 @@
 ---
 name: shipflow
-description: Drive ShipFlow from Claude Code via the `renaiss-shipflow` CLI, which signals ShipFlow (Discord, the dashboard, teammates) and uses gh for GitHub writes. Use when the user mentions ShipFlow, or wants to check project status / what to work on, list or file issues, pick up / claim / release an issue, attach test evidence (screenshot or video) to an issue, autonomously loop through and fix issues, open or merge a PR, run tests or regression, cut a release, or sign in.
+description: Drive ShipFlow from Claude Code via the `renaiss-shipflow` CLI, which signals ShipFlow (Discord, the dashboard, teammates) and uses gh for GitHub writes. Use when the user mentions ShipFlow, or wants to check project status / what to work on, list or file issues, pick up / claim / release an issue, attach test evidence (screenshot or video) to an issue, autonomously loop through and fix issues, open or merge a PR, run tests or regression, cut a release, or sign in. Also use proactively when the user starts feature/change work that has no issue (to relate it to an open issue or open one).
 ---
 
 # ShipFlow
@@ -43,6 +43,8 @@ requests to the same CLI calls.
 | "what's my status" / "what's on my plate" | `renaiss-shipflow status --json` |
 | "list issues" / "show open issues" | `renaiss-shipflow issues list --json` |
 | "open an issue about X" / "file an issue" | `renaiss-shipflow issue create --title "X" --body "..."` |
+| "I'm building X" / feature work with no issue / before a PR with no `Fixes #N` | Detect a related open issue — read `references/feature-issue-detection.md` |
+| "auto-create issues" / "enable auto issue" | `renaiss-shipflow config set auto-issue true` |
 | "let me work on issue 42" / "pick up #42" | `renaiss-shipflow issue work 42 --json` |
 | "pick the next issue" / "what should I work on" | `renaiss-shipflow issue next --json` |
 | "what needs follow-up" / "any PR comments" / "check my open PRs" | `renaiss-shipflow inbox --json` |
