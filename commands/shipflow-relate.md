@@ -5,6 +5,9 @@ description: Check if your current (issue-less) feature work relates to an open 
 The user is doing feature/change work without an issue. Detect a related open
 issue, and otherwise open one:
 
+0. **Skip trivial changes** — typo/copy/text edits, wording, comments,
+   formatting, tiny cosmetic tweaks, version/lockfile bumps: just make them, no
+   issue (even in auto mode). Only continue for substantive work worth tracking.
 1. Summarize the work from $ARGUMENTS, the current branch, and `git diff`.
 2. `renaiss-shipflow issues list --json` and semantically check whether an open
    issue already covers it.

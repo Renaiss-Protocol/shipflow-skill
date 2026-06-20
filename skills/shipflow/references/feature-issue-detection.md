@@ -7,6 +7,13 @@ substantial work land un-tracked, without creating duplicate issues.
 
 ## Steps
 
+0. **Skip trivial changes — no issue needed.** If the work is small and subtle —
+   a typo/copy/text edit, wording or label change, comment, formatting/whitespace,
+   a tiny cosmetic tweak, a version bump or lockfile update — just make it and
+   move on. Do **not** detect, ask, or create an issue, **even in auto mode**.
+   Only run the rest of this flow for substantive feature/behavior/bug work that's
+   worth tracking. When unsure, lean trivial for one-liners; lean track-it for
+   anything touching logic, data, or user-facing behavior.
 1. **Summarize the work** in a sentence or two — from the user's description, the
    branch name, and/or `git diff` / recent commits. That intent is the query.
 2. **List candidates:** `renaiss-shipflow issues list --json`.
