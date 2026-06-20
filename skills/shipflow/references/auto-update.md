@@ -23,6 +23,13 @@ silently installs any pending update at the start of each session. Combined with
 this preamble, updates get installed proactively — you don't run anything — and
 load **automatically on your next session**.
 
+**Opt-in same-session apply:** set `SHIPFLOW_LIVE_RELOAD=true` and the hook also
+refreshes the loaded plugin dir in place and emits `reloadSkills`, so new
+skills/commands apply in the **current** session (the gstack trick). Experimental
+— it leaves the version label stale until next session and may not pick up every
+change depending on Claude Code's reload scope; the default (next-session) path is
+the safe one.
+
 ## Why the skill can't apply it *this* session
 
 Claude Code **pins the plugin version at session start, before hooks run**, so a
