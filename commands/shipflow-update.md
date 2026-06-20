@@ -9,5 +9,5 @@ PLUGIN_DIR=$(ls -d ~/.claude/plugins/cache/renaissshipflow/shipflow/*/ 2>/dev/nu
 [ -n "$PLUGIN_DIR" ] && "$PLUGIN_DIR/bin/shipflow-update-check" --force || echo "ShipFlow plugin not found in the plugin cache."
 ```
 
-- If it prints `UPGRADE_AVAILABLE <old> <new>`: run `claude plugin marketplace update renaissshipflow` then `claude plugin update shipflow@renaissshipflow`, and tell the user to restart Claude Code to apply it.
+- If it prints `UPGRADE_AVAILABLE <old> <new>`: run `claude plugin marketplace update renaissshipflow` then `claude plugin update shipflow@renaissshipflow`, then tell the user to run **`/reload-plugins`** to apply it in-session (or it loads on next restart). The bundled CLI updates live; the reload is only for new/changed slash commands and skill files. The assistant cannot run `/reload-plugins` itself — it's a manual command.
 - If it prints nothing: tell the user they're on the latest version.

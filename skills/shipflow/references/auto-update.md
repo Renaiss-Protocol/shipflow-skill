@@ -13,8 +13,23 @@ continues).
    claude plugin update shipflow@renaissshipflow >/dev/null 2>&1 || true
    ```
 2. Tell the user, concisely:
-   `⬆️ ShipFlow updated v{old} → v{new}. Restart Claude Code (or /exit and reopen) to load it — plugin updates apply on restart.`
+   `⬆️ ShipFlow updated v{old} → v{new}. Run /reload-plugins to apply it now (or it loads on next restart).`
 3. **Continue with the user's original request.** Never block on the update.
+
+## Why the skill can't apply it for you
+
+Claude Code only has a `claude plugin update` CLI (which **installs** to disk but
+says "restart required") — there is **no** command, hook, or API for a skill to
+reload plugins into the *running* session. `/reload-plugins` is the only
+in-session apply and it's a **manual user action** the assistant cannot self-type.
+So the best the auto-update can do is install silently and point the user at
+`/reload-plugins`.
+
+Good news — most updates need **no** reload: the `renaiss-shipflow` **CLI is
+bundled and re-resolved from disk on the next skill run** (the preamble symlinks
+the newest version), so CLI behavior (commands, ordering, inbox, config) updates
+**live**. A reload/restart is only needed to pick up **new or changed skill files**
+— added slash commands, edited loop steps, reference docs.
 
 If `claude plugin update` is unavailable or errors, tell the user to run
 `/shipflow-update` (or `claude plugin update shipflow@renaissshipflow`) manually,
