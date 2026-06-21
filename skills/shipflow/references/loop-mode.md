@@ -1,98 +1,144 @@
-# Loop mode — autonomous issue-fixing
+# Loop mode — autonomous issue → PR reconciler
 
 Enter this mode **only** when the user explicitly asks to loop through and fix
 issues (e.g. "loop through the issues and fix them", "auto-fix issues"). In this
 mode the skill's "Do NOT auto-branch / auto-fix" guardrails are overridden —
 auto-branching and fixing *is* the requested intent.
 
+**The model is a reconciler, not a pipeline.** Each tick you first drive *every*
+PR/issue you already own one step toward `merged`, and only *then* admit new work
+— and only while you're under the WIP limit. State lives in GitHub + ShipFlow
+(labels, claims, PR/CI/review status), not in your head, so a stopped loop just
+re-reads `inbox --json` and resumes.
+
 ## Setup — run in a worktree (once, before the cycle)
 
-The loop **always** works in a git worktree, never in the user's live checkout,
-so they can keep working while it runs. Use a **single** worktree, reused for
-every iteration (not one per issue):
+The loop **always** works in a git worktree, never in the user's live checkout.
+Use a **single** worktree, reused for every iteration (not one per issue):
 
 - Prefer the `EnterWorktree` tool with a fixed name (`shipflow-loop`); it creates
-  the worktree off the default branch and switches the session into it. Fall back
-  to `git worktree add .worktrees/shipflow-loop -b shipflow-loop/base origin/<default>`
+  the worktree off the default branch and switches into it. Fall back to
+  `git worktree add .worktrees/shipflow-loop -b shipflow-loop/base origin/<default>`
   (ensure `.worktrees/` is gitignored) and `cd` into it.
 - If already in that worktree (resuming), reuse it — don't create another.
-- All branching, fixing, testing, committing, and pushing happen inside this one
-  worktree. At the end of the run, surface its path + branch; clean it up only
-  after the PRs merge.
+- All branching, fixing, testing, committing, pushing happen inside this one
+  worktree. At the end, surface its path + branch; clean it up only after merge.
 
-Run this cycle, one item per iteration (all inside the loop worktree):
+## Policies — the three knobs (set once, then trust them)
 
-1. **Reconcile open work first** — before picking anything new, run
-   `renaiss-shipflow inbox --json` and clear it:
-   - For each PR with `needsAttention` (`changes_requested`, `ci_failing`, or
-     `review_comments`): **work through every reviewer comment** and fix what you
-     can — follow `references/pr-feedback.md` (gather general + inline + review +
-     CI feedback, fix each actionable point on the branch, push, then **reply on
-     the PR** summarizing what you changed and asking about anything unclear).
-   - For each in-progress issue with a `newComment`: read it
-     (`gh issue view <n> --comments`) and act — answer the question, adjust the
-     fix, or note it.
-   - **Comment when it adds signal**: reply to reviewers so they know what was
-     addressed; add a note on the linked **issue** when the feedback changes
-     scope/behavior or the reporter should know. Don't post empty "done" noise.
-   - Only when the inbox is clear (nothing needs attention) move on to step 2.
-2. **Pick** — `renaiss-shipflow issue next --json` (claims the next open,
-   unclaimed issue, ordered priority → severity → newest). Optional filters:
-   `--label bug` / `--assignee <me>`.
-   - **Exit code 4** / `issue: null` → no actionable issues remain. **Stop the
-     loop** and summarize what you shipped.
-   - Use `triage.relatedFiles` / `relatedCommits` to orient before reading code.
-3. **Branch** — inside the loop worktree, base each issue's branch on the latest
-   default branch: `git fetch origin && git checkout -b fix/issue-<n>-<short-slug>
-   origin/<default>`. One branch per issue; never pile fixes onto one branch. (The
-   worktree is reused; only the branch changes per issue.)
-4. **Fix** — investigate and make the change. Make a genuine attempt to verify —
-   start the dev server, seed a local/test DB, stand up what you need;
-   environmental friction is **not** a reason to abandon. Only if it's truly too
-   risky, ambiguous, unreproducible, or impossible to verify here: **keep the
-   claim** (do not release it yet — the held claim makes step 2 skip it next
-   time), record it as blocked with the reason, and **continue to the next
-   iteration**. Do not open a PR for it, and do **not** stop the loop.
-5. **Test** — run the project's tests, then **verify end-to-end in a real
-   browser** for any UI/behavior change: follow `references/browser-testing.md`
-   (resolve the browser via `bin/shipflow-browser`, reuse the headed session,
-   drive the fix, confirm with a `snapshot -D` diff + no new console errors, and
-   capture before/after **screenshots**). Read the screenshots so they're visible.
-   Only proceed if it genuinely verifies — otherwise fix it or release as blocked,
-   never open a PR for an unverified fix. Pure backend/library changes can verify
-   with the project's tests alone.
-6. **Evidence** — attach the screenshot(s)/recording captured in step 5:
-   `renaiss-shipflow issue evidence <n> --file <shot-or-video> --caption "Verified:
-   <what you tested>"`. Lands as a GitHub issue comment + the reporter's chat
-   thread.
-7. **PR** — commit, push the branch, then `renaiss-shipflow pr create --json`
-   (body `Fixes #<n>`).
-8. **Release** — `renaiss-shipflow issue done <n> --reason "PR #<pr> opened"` so
-   the claim frees up and the loop can advance.
-9. **Repeat** from step 1 — the next iteration's reconcile will pick up any review
-   that lands on the PR you just opened.
+How far the loop drives a PR without a human is configured, not hard-coded.
+Read them with `renaiss-shipflow config list`; set with `config set <key> <v>`
+(env vars `SHIPFLOW_*` override):
+
+| Knob | Default | Meaning |
+|---|---|---|
+| `merge-policy` | `manual` | `manual` = never auto-merge (park for a human) · `auto-on-green` = merge when CI green **and** approved · `auto-timeout` = green + no objection past `stale-pr-hours` |
+| `require-ci` | `true` | CI must be green before a PR is "advanced" / merged |
+| `max-fix-attempts` | `3` | CI-fix tries on one PR before escalating to a human |
+| `wip-limit` | `3` | max open PRs you own before you stop admitting new work |
+| `stale-pr-hours` | `48` | a green, unreviewed PR older than this is `stale` → ping/escalate |
+
+The real merge guard is the repo's **GitHub branch protection** — even `auto-on-green`
+can't merge what GitHub blocks. Approval = a GitHub review approval **or** a
+`shipflow-approved` label (a human/dashboard can add the label).
+
+## The cycle — each tick
+
+### A. Reconcile in-flight work — drive every owned item toward merged
+
+Run `renaiss-shipflow inbox --json`. It classifies each of your open PRs into a
+single `state`. Act per state (see the playbook table below), then loop A again
+until nothing in-flight `needsAttention`:
+
+- `ci_failing` → check it out, fix the failing checks (`gh pr checks <n>`), push.
+  **Count the attempt.** After `max-fix-attempts` with the build still red →
+  `renaiss-shipflow issue escalate <issue> --reason "CI red after N attempts: <summary>"`.
+- `changes_requested` / `review_comments` → follow `references/pr-feedback.md`
+  (gather general + inline + review comments, fix each actionable point, push,
+  **reply on the PR** summarizing what changed; note the **issue** if scope shifts).
+  Ambiguous or conflicting feedback you can't resolve → escalate the issue.
+- `approved_ready` → `renaiss-shipflow pr automerge <n> --json`. It merges **only**
+  if `merge-policy` + CI + approval allow, else it no-ops and exits 5 (leave it
+  parked). On `manual` it always parks — that's correct, not a failure.
+- `stale` → a parked PR aged past `stale-pr-hours`: post one nudge on the PR; if
+  it's blocked on a human decision, `issue escalate` it.
+- conflict (`pr ready`/`automerge` reports a merge conflict) → on the PR's branch
+  run `renaiss-shipflow pr sync <n>` (rebases onto the base). Exit 6 = conflict it
+  couldn't auto-resolve → escalate.
+- `ci_pending` / `awaiting_review` → **parked, no action.** A next tick will
+  re-check; don't busy-wait.
+
+For each in-progress issue with a `newComment`: read it
+(`gh issue view <n> --comments`) and act — answer, adjust the fix, or escalate.
+
+### B. Admit new work — only under the WIP limit
+
+If (open PRs you own) ≥ `wip-limit`, **skip B this tick** (you have enough in
+flight; go drain A). Otherwise, and while PRs-opened-this-run < `cap`:
+
+1. **Pick** — `renaiss-shipflow issue next --json` (claims the next open, unclaimed
+   issue, priority → severity → newest; optional `--label bug`). Skips anything
+   labelled `needs-human`/claimed. **Exit 4** / `issue: null` → nothing to admit.
+   Use `triage.relatedFiles` / `relatedCommits` to orient.
+   - **Dependency check:** if the issue says it's blocked by / depends on another
+     issue or PR (`blocked by #X`, `depends on #X`, `after #X`) that isn't merged
+     yet, don't fix it out of order — `renaiss-shipflow issue escalate <n> --reason
+     "blocked by #X (not yet merged)"` and pick the next one.
+2. **Branch** — base on the latest default branch: `git fetch origin && git
+   checkout -b fix/issue-<n>-<slug> origin/<default>`. One branch per issue.
+3. **Fix** — investigate and change. Genuinely try to verify (start the dev
+   server, seed a test DB); environmental friction is **not** grounds to abandon.
+   Truly too risky/ambiguous/unreproducible → `renaiss-shipflow issue escalate <n>
+   --reason "<why>"` (labels `needs-human`, keeps the claim so it's skipped) and
+   continue. No PR; never stop the loop.
+4. **Test** — project tests, then **verify end-to-end in a real browser** for any
+   UI/behavior change (`references/browser-testing.md`: resolve via
+   `bin/shipflow-browser`, drive the fix, `snapshot -D` + no new console errors,
+   capture before/after **screenshots** and Read them). Unverified → escalate, no PR.
+5. **PR** — commit, push, `renaiss-shipflow pr create --json` (body `Fixes #<n>`).
+   Note the PR number.
+6. **Evidence** — attach the step-4 screenshots **to the PR**:
+   `renaiss-shipflow issue evidence <n> --pr <pr> --file <shot> --caption "Verified:
+   <what>"` (PR comment + reporter's chat thread; issue stays linked via `Fixes`).
+
+Do **not** `issue done` here — the PR isn't merged. The claim stays until the PR
+merges (reconcile's `automerge` releases it, or a human merge does). This keeps
+the issue out of `issue next` while its PR is in flight.
+
+### C. Repeat
+
+Loop A→B until **both**: PRs-opened-this-run has hit `cap` **and** nothing
+in-flight needs action (A is clean). `cap` precedence: a `cap=N` token the user
+passed (`cap=all` drains the queue), else `SHIPFLOW_LOOP_CAP`, else **5**.
+
+## Reconcile playbook (inbox `state` → action)
+
+| `state` | What it means | Action |
+|---|---|---|
+| `ci_failing` | a check is red | fix on branch, push; escalate after `max-fix-attempts` |
+| `changes_requested` | reviewer wants changes | pr-feedback → fix → push → reply |
+| `review_comments` | unaddressed comments | pr-feedback (may already be handled) → reply |
+| `ci_pending` | checks running | park — re-check next tick |
+| `approved_ready` | approved + CI green | `pr automerge` (parks on `manual`) |
+| `stale` | green, unreviewed, old | nudge the PR; escalate if blocked on a human |
+| `awaiting_review` | green, no feedback yet | park |
 
 ## Guardrails
 
-- **Never** `pr merge` or cut a `release` inside the loop — those need explicit
-  human confirmation each time.
-- Reconcile (step 1) handles your own PRs and claimed issues. Don't act on PRs or
-  issues authored by other people without being asked.
-- **Run to the cap — do not stop early to ask.** Keep cycling (pick → … → PR)
-  until you have opened `cap` PRs **or** step 2 returns no actionable issue. The
-  cap is, in order of precedence: a `cap=N` token the user passed (`cap=all`
-  drains the whole queue), else the `SHIPFLOW_LOOP_CAP` env var, else **5**. The
-  user can also just say it in plain language ("do up to 10", "no cap"). A single hard / blocked / unverifiable issue is skipped
-  (step 4, claim held) and the loop moves on — it never ends the run, and you
-  never pause mid-run to ask the user for direction or permission.
-- Because blocked issues keep their claim, step 2 naturally advances **down the
-  priority list** to the next workable issue. When step 2 finally returns null,
-  every remaining issue is either shipped or blocked-by-you — that's the stop.
-- An unverified fix is never shipped: if the browser/test check fails and you
-  can't fix it, treat the issue as blocked (skip + continue) — not as a reason to
-  halt the loop.
-- **Only at the cap or an empty queue:** release any held blocked claims
-  (`renaiss-shipflow issue done <n> --reason "blocked: <why>"`), then summarize —
-  PRs opened, and issues blocked with reasons — and ask whether to continue beyond
-  the cap or to merge anything. `pr merge` / `release` still need explicit
+- **`pr automerge` is the only merge path the loop uses** — it self-gates on
+  `merge-policy`. With the default `manual` it never merges; approved PRs pile up
+  cleanly for a human. **Never** call bare `pr merge` or cut a `release` without
+  explicit human confirmation.
+- **Escalate, don't spin.** A single hard/blocked/unverifiable item →
+  `issue escalate` (labels `needs-human`, keeps the claim, comments why) and move
+  on. It never ends the run; you never pause mid-run to ask for direction.
+- Reconcile (A) acts only on **your own** PRs and claimed issues. Don't touch
+  others' PRs/issues unless asked.
+- Because blocked/escalated issues keep their claim and carry `needs-human`,
+  `issue next` advances down the priority list. When B's pick returns null **and**
+  A is clean, the run is done.
+- **At the cap or an empty queue:** summarize — PRs opened, merged (if policy
+  allowed), parked-awaiting-review, and escalated (with reasons) — then ask
+  whether to continue beyond the cap, raise the merge policy, or merge anything by
+  hand. Releasing escalated claims and any `pr merge`/`release` still need explicit
   confirmation.

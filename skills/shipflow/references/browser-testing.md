@@ -57,13 +57,16 @@ $BROWSE screenshot "$EV/after.png"  # the fix working
   and fix, or release the issue as blocked — do **not** open a PR for an unverified
   fix.
 
-## 5. Hand the evidence to the issue
+## 5. Hand the evidence to the PR
 
-The captured screenshot(s) become the issue evidence in loop step 6:
+Once the PR is open (loop step 6), attach the captured screenshot(s) **to the PR**
+so reviewers see the verification inline — pass the PR number with `--pr`:
 
 ```bash
-renaiss-shipflow issue evidence <n> --file "$EV/after.png" --caption "Verified: <what you tested>"
+renaiss-shipflow issue evidence <n> --pr <pr> --file "$EV/after.png" --caption "Verified: <what you tested>"
 ```
 
-Attach a short screen recording instead/as well for flows that need motion
-(`--file demo.mp4`). This posts to the GitHub issue + the reporter's chat thread.
+With `--pr`, the comment lands on the PR (plus the reporter's chat thread); the
+issue stays linked through the PR's `Fixes #<n>`. Without a PR, it falls back to an
+issue comment. Attach a short screen recording instead/as well for flows that need
+motion (`--file demo.mp4`).

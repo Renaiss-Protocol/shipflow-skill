@@ -2095,6 +2095,7 @@ var CONFIG_DIR = join(homedir(), ".config", "renaissshipflow");
 var CONFIG_FILE = join(CONFIG_DIR, "config.json");
 var CREDS_FILE = join(CONFIG_DIR, "credentials.json");
 var PROJECTS_FILE = join(CONFIG_DIR, "projects.json");
+var MERGE_POLICIES = ["manual", "auto-on-green", "auto-timeout"];
 function ensureDir() {
   if (!existsSync(CONFIG_DIR)) {
     mkdirSync(CONFIG_DIR, { recursive: true, mode: 448 });
@@ -2150,6 +2151,44 @@ function resolveLiveReload() {
   if (env != null && env !== "")
     return parseBool(env);
   return loadConfig().liveReload;
+}
+function parseIntOr(v, fallback) {
+  if (typeof v === "number")
+    return Number.isFinite(v) && v >= 0 ? v : fallback;
+  if (v == null || v.trim() === "")
+    return fallback;
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+function resolveRequireCi() {
+  const env = process.env.SHIPFLOW_REQUIRE_CI;
+  if (env != null && env !== "")
+    return parseBool(env);
+  const c = loadConfig().requireCi;
+  return c === undefined ? true : c;
+}
+function resolveMergePolicy() {
+  const env = process.env.SHIPFLOW_MERGE_POLICY;
+  const raw = env != null && env !== "" ? env : loadConfig().mergePolicy;
+  return raw && MERGE_POLICIES.includes(raw) ? raw : "manual";
+}
+function resolveMaxFixAttempts() {
+  const env = process.env.SHIPFLOW_MAX_FIX_ATTEMPTS;
+  if (env != null && env !== "")
+    return parseIntOr(env, 3);
+  return parseIntOr(loadConfig().maxFixAttempts, 3);
+}
+function resolveWipLimit() {
+  const env = process.env.SHIPFLOW_WIP_LIMIT;
+  if (env != null && env !== "")
+    return parseIntOr(env, 3);
+  return parseIntOr(loadConfig().wipLimit, 3);
+}
+function resolveStalePrHours() {
+  const env = process.env.SHIPFLOW_STALE_PR_HOURS;
+  if (env != null && env !== "")
+    return parseIntOr(env, 48);
+  return parseIntOr(loadConfig().stalePrHours, 48);
 }
 function resolveApiUrl(flagUrl) {
   return flagUrl || process.env.SHIPFLOW_API_URL || loadConfig().apiUrl || "http://localhost:8080";
@@ -2819,7 +2858,7 @@ function ghPRMerge(repo, number, mode = "squash", deleteBranch = true) {
   const parsed = JSON.parse(view);
   return { mergedSha: parsed.mergeCommit?.oid ?? "" };
 }
-var PR_FIELDS = "number,title,headRefName,url,isDraft,reviewDecision,reviews,comments,statusCheckRollup,closingIssuesReferences,updatedAt";
+var PR_FIELDS = "number,title,headRefName,baseRefName,url,isDraft,reviewDecision,mergeable,labels,reviews,comments,statusCheckRollup,closingIssuesReferences,createdAt,updatedAt";
 function ghPRListMine(repo, limit = 30) {
   const out = _exec(`gh pr list --repo ${shellQuote(repo)} --author @me --state open --limit ${limit} --json ${PR_FIELDS}`).toString();
   return JSON.parse(out);
@@ -2834,6 +2873,29 @@ function ghCurrentLogin() {
 function ghIssueListByLabel(repo, label, limit = 30) {
   const out = _exec(`gh issue list --repo ${shellQuote(repo)} --state open --label ${shellQuote(label)} --limit ${limit} --json ${FIELDS},comments`).toString();
   return JSON.parse(out);
+}
+function ghPRView(repo, number) {
+  const out = _exec(`gh pr view ${number} --repo ${shellQuote(repo)} --json ${PR_FIELDS}`).toString();
+  return JSON.parse(out);
+}
+function ghEnsureLabel(repo, name, color = "ededed", description = "") {
+  try {
+    _exec(`gh label create ${shellQuote(name)} --repo ${shellQuote(repo)} --color ${shellQuote(color)} --description ${shellQuote(description)} --force`, { stdio: "ignore" });
+  } catch {}
+}
+function ghIssueAddLabels(repo, number, labels) {
+  if (!labels.length)
+    return;
+  const flags = labels.map((l) => `--add-label ${shellQuote(l)}`).join(" ");
+  _exec(`gh issue edit ${number} --repo ${shellQuote(repo)} ${flags}`, { stdio: "ignore" });
+}
+function ghIssueRemoveLabel(repo, number, label) {
+  try {
+    _exec(`gh issue edit ${number} --repo ${shellQuote(repo)} --remove-label ${shellQuote(label)}`, { stdio: "ignore" });
+  } catch {}
+}
+function ghIssueComment(repo, number, body) {
+  _exec(`gh issue comment ${number} --repo ${shellQuote(repo)} --body ${shellQuote(body)}`, { stdio: "ignore" });
 }
 function shellQuote(s) {
   return `'${s.replace(/'/g, `'\\''`)}'`;
@@ -3090,6 +3152,8 @@ function sortIssuesForPickup(issues) {
 }
 
 // src/commands/issue.ts
+var IN_PROGRESS_LABEL = "\uD83E\uDD16 in-progress";
+var NEEDS_HUMAN_LABEL = "needs-human";
 function registerIssueCommand(program2) {
   const issue = program2.command("issue").description("Issue actions");
   issue.command("create").description("Open a new issue (and signal ShipFlow)").option("--repo <fullname>", "Override target repo").option("--title <title>", "Issue title").option("--body <body>", "Issue body (- for stdin)").action(async (opts) => {
@@ -3171,7 +3235,34 @@ function registerIssueCommand(program2) {
     await ctx.client.signal(ctx.creds.org, ctx.project.projectId, "issues", number, "release-claim", { repo, reason: opts.reason ?? "" });
     console.log(`Released #${number}.`);
   });
-  issue.command("evidence <number>").description("Attach testing screenshots/video to an issue (reporter thread + GitHub comment)").option("--image <path...>", "Screenshot file(s)").option("--file <path...>", "Any media file(s) — screenshots or video (mp4/mov/webm)").option("--pr <n>", "Related PR number").option("--preview-url <url>", "Testing site URL").option("--caption <text>", "Short note shown with the evidence").option("--repo <fullname>", "Override target repo").option("--json", "Output JSON").action(async (numberStr, opts) => {
+  issue.command("escalate <number>").description("Hand an issue to a human: label needs-human + comment why. Keeps the work lock so the loop skips it this run.").option("--reason <reason>", "Why it's blocked / what a human must decide", "").option("--repo <fullname>", "Override target repo").option("--keep-in-progress", "Keep the \uD83E\uDD16 in-progress label (default: swap it for needs-human)").option("--release", "Also release the ShipFlow claim (default: keep it so the loop won't re-pick it this run)").option("--json", "Output JSON").action(async (numberStr, opts) => {
+    const ctx = await loadCtx(program2);
+    const number = parseInt(numberStr, 10);
+    const repo = opts.repo ?? ctx.project.repoFullName;
+    const reason = (opts.reason ?? "").trim();
+    ghEnsureLabel(repo, NEEDS_HUMAN_LABEL, "d93f0b", "ShipFlow loop needs a human to decide");
+    ghIssueAddLabels(repo, number, [NEEDS_HUMAN_LABEL]);
+    if (!opts.keepInProgress)
+      ghIssueRemoveLabel(repo, number, IN_PROGRESS_LABEL);
+    ghIssueComment(repo, number, `\uD83D\uDEA7 **Needs a human** — the ShipFlow loop escalated this.
+
+${reason || "_No reason given._"}`);
+    let released = false;
+    if (opts.release) {
+      try {
+        await ctx.client.signal(ctx.creds.org, ctx.project.projectId, "issues", number, "release-claim", { repo, reason: `escalated: ${reason}` });
+        released = true;
+      } catch (e) {
+        console.warn(`Escalated, but the release signal failed: ${e.message}`);
+      }
+    }
+    if (opts.json) {
+      console.log(JSON.stringify({ number, escalated: true, label: NEEDS_HUMAN_LABEL, released, reason }));
+      return;
+    }
+    console.log(`\uD83D\uDEA7 #${number} escalated → labelled "${NEEDS_HUMAN_LABEL}"${released ? " and claim released" : " (claim kept — loop skips it this run)"}.`);
+  });
+  issue.command("evidence <number>").description("Attach testing screenshots/video (reporter thread + a comment on the PR, or the issue if no --pr)").option("--image <path...>", "Screenshot file(s)").option("--file <path...>", "Any media file(s) — screenshots or video (mp4/mov/webm)").option("--pr <n>", "Related PR number — when set, the evidence comment lands on the PR instead of the issue").option("--preview-url <url>", "Testing site URL").option("--caption <text>", "Short note shown with the evidence").option("--repo <fullname>", "Override target repo").option("--json", "Output JSON").action(async (numberStr, opts) => {
     const paths = [...opts.file ?? [], ...opts.image ?? []];
     if (!paths.length) {
       console.error("At least one --file (or --image) is required.");
@@ -3198,6 +3289,8 @@ function registerIssueCommand(program2) {
     const where = [];
     if (res.threadNotified)
       where.push("reporter thread");
+    if (res.prCommented)
+      where.push("PR comment");
     if (res.githubCommented)
       where.push("GitHub issue comment");
     console.log(`\uD83E\uDDEA Evidence delivered to: ${where.join(" + ") || "nowhere (check server logs)"}`);
@@ -3250,9 +3343,36 @@ async function readStdin() {
   return Buffer.concat(chunks).toString("utf-8");
 }
 
-// src/commands/inbox.ts
-var IN_PROGRESS_LABEL = "\uD83E\uDD16 in-progress";
+// src/pr-state.ts
 var FAILING = new Set(["FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "ERROR", "STARTUP_FAILURE"]);
+var PENDING = new Set(["PENDING", "EXPECTED", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED"]);
+var APPROVAL_LABELS = new Set(["shipflow-approved", "approved", "✅ approved"]);
+function ciStateOf(checks) {
+  if (!checks || checks.length === 0)
+    return "none";
+  let failing = false;
+  let pending = false;
+  let passing = false;
+  for (const c of checks) {
+    const concl = (c.conclusion ?? "").toUpperCase();
+    const status = (c.status ?? "").toUpperCase();
+    const state = (c.state ?? "").toUpperCase();
+    if (FAILING.has(concl) || FAILING.has(state)) {
+      failing = true;
+    } else if (status && status !== "COMPLETED" || PENDING.has(state)) {
+      pending = true;
+    } else if (concl === "SUCCESS" || concl === "NEUTRAL" || concl === "SKIPPED" || state === "SUCCESS") {
+      passing = true;
+    }
+  }
+  if (failing)
+    return "failing";
+  if (pending)
+    return "pending";
+  if (passing)
+    return "passing";
+  return "none";
+}
 function prAttentionReasons(pr, me) {
   const reasons = [];
   if (pr.reviewDecision === "CHANGES_REQUESTED")
@@ -3273,8 +3393,71 @@ function issueNeedsReply(comments, me) {
   const last = comments[comments.length - 1];
   return last.author && last.author.login !== me ? last : null;
 }
+function isApproved(pr) {
+  if (pr.reviewDecision === "APPROVED")
+    return true;
+  return (pr.labels ?? []).some((l) => APPROVAL_LABELS.has(l.name.trim().toLowerCase()));
+}
+function hoursSince(iso, nowMs = Date.now()) {
+  if (!iso)
+    return 0;
+  const t = Date.parse(iso);
+  if (Number.isNaN(t))
+    return 0;
+  return Math.max(0, (nowMs - t) / 3600000);
+}
+function classifyPR(pr, me, opts = {}) {
+  const reasons = prAttentionReasons(pr, me);
+  const ciState = ciStateOf(pr.statusCheckRollup);
+  const approved = isApproved(pr);
+  const ageHours = hoursSince(pr.updatedAt, opts.nowMs);
+  const staleHours = opts.staleHours ?? 48;
+  let state;
+  if (ciState === "failing")
+    state = "ci_failing";
+  else if (pr.reviewDecision === "CHANGES_REQUESTED")
+    state = "changes_requested";
+  else if (reasons.includes("review_comments"))
+    state = "review_comments";
+  else if (ciState === "pending")
+    state = "ci_pending";
+  else if (approved)
+    state = "approved_ready";
+  else if (ageHours >= staleHours)
+    state = "stale";
+  else
+    state = "awaiting_review";
+  const needsAction = state !== "ci_pending" && state !== "awaiting_review";
+  return { number: pr.number, state, ciState, approved, ageHours, reasons, needsAction };
+}
+function mergeDecision(pr, me, opts) {
+  const cl = classifyPR(pr, me, { staleHours: opts.staleHours, nowMs: opts.nowMs });
+  const blockers = [];
+  if (opts.policy === "manual")
+    blockers.push("merge-policy is manual (human merge required)");
+  if (cl.ciState === "failing")
+    blockers.push("CI is failing");
+  if (cl.ciState === "pending")
+    blockers.push("CI still running");
+  if (opts.requireCi && cl.ciState === "none")
+    blockers.push("no CI checks to confirm (set require-ci=false to allow)");
+  if (pr.reviewDecision === "CHANGES_REQUESTED")
+    blockers.push("changes requested");
+  if ((pr.mergeable ?? "").toUpperCase() === "CONFLICTING")
+    blockers.push("merge conflict with base (run: pr sync)");
+  if (opts.policy === "auto-on-green" && !cl.approved) {
+    blockers.push("not approved (needs a GitHub review approval or a shipflow-approved label)");
+  }
+  if (opts.policy === "auto-timeout" && !cl.approved && cl.ageHours < opts.staleHours) {
+    blockers.push(`awaiting approval or the ${opts.staleHours}h timeout (age ${Math.round(cl.ageHours)}h)`);
+  }
+  return { policy: opts.policy, wouldMerge: blockers.length === 0, blockers };
+}
+
+// src/commands/inbox.ts
+var IN_PROGRESS_LABEL2 = "\uD83E\uDD16 in-progress";
 function registerInboxCommand(program2) {
-  program2.command("inbox").description("Open PRs (review feedback / failing CI) and in-progress issues (new comments) needing follow-up before new work").option("--repo <fullname>", "Override target repo").option("--json", "Output JSON").action(async (opts) => {
+  program2.command("inbox").description("Reconciler view: open PRs (by state: ci_failing / changes_requested / approved_ready / stale …) and in-progress issues with new comments").option("--repo <fullname>", "Override target repo").option("--json", "Output JSON").action(async (opts) => {
     const auth = resolveAuthToken();
     const creds = loadCredentials();
     if (!auth || !creds) {
@@ -3285,21 +3468,27 @@ function registerInboxCommand(program2) {
     const project = await resolveProject(client, creds);
     const repo = opts.repo ?? project.repoFullName;
     const me = ghCurrentLogin();
+    const staleHours = resolveStalePrHours();
     const prs = ghPRListMine(repo).map((pr) => {
-      const reasons = prAttentionReasons(pr, me);
+      const cl = classifyPR(pr, me, { staleHours });
       return {
         number: pr.number,
         title: pr.title,
         branch: pr.headRefName,
+        base: pr.baseRefName ?? "",
         url: pr.url,
         draft: pr.isDraft,
         reviewDecision: pr.reviewDecision || "none",
         closesIssues: (pr.closingIssuesReferences ?? []).map((i) => i.number),
-        needsAttention: reasons.length > 0,
-        reasons
+        state: cl.state,
+        ciState: cl.ciState,
+        approved: cl.approved,
+        ageHours: Math.round(cl.ageHours),
+        needsAttention: cl.needsAction,
+        reasons: cl.reasons
       };
     });
-    const issues = ghIssueListByLabel(repo, IN_PROGRESS_LABEL).map((i) => {
+    const issues = ghIssueListByLabel(repo, IN_PROGRESS_LABEL2).map((i) => {
       const reply = issueNeedsReply(i.comments ?? [], me);
       return {
         number: i.number,
@@ -3309,65 +3498,131 @@ function registerInboxCommand(program2) {
         needsAttention: !!reply
       };
     });
-    const prAttn = prs.filter((p) => p.needsAttention).length;
-    const issueAttn = issues.filter((i) => i.needsAttention).length;
+    const count = (s) => prs.filter((p) => p.state === s).length;
+    const summary = {
+      prsNeedingAttention: prs.filter((p) => p.needsAttention).length,
+      issuesNeedingAttention: issues.filter((i) => i.needsAttention).length,
+      readyToMerge: count("approved_ready"),
+      ciFailing: count("ci_failing"),
+      changesRequested: count("changes_requested"),
+      stale: count("stale"),
+      parked: prs.filter((p) => p.state === "awaiting_review" || p.state === "ci_pending").length
+    };
     if (opts.json) {
-      console.log(JSON.stringify({ repo, prs, issues, summary: { prsNeedingAttention: prAttn, issuesNeedingAttention: issueAttn } }, null, 2));
+      console.log(JSON.stringify({ repo, prs, issues, summary }, null, 2));
       return;
     }
     console.log(`\uD83D\uDCE5 Inbox for ${repo}`);
-    console.log(`Open PRs: ${prs.length} (${prAttn} need attention) · in-progress issues: ${issues.length} (${issueAttn} with new comments)`);
+    console.log(`Open PRs: ${prs.length} (${summary.prsNeedingAttention} need action, ${summary.readyToMerge} ready to merge) · in-progress issues: ${issues.length} (${summary.issuesNeedingAttention} with new comments)`);
+    const icon = {
+      ci_failing: "\uD83D\uDD34",
+      changes_requested: "✏️ ",
+      review_comments: "\uD83D\uDCAC",
+      ci_pending: "⏳",
+      approved_ready: "✅",
+      stale: "\uD83D\uDD70️ ",
+      awaiting_review: "·"
+    };
     for (const p of prs)
-      console.log(`  ${p.needsAttention ? "⚠️ " : "✓ "}PR #${p.number} — ${p.title}  [${p.reasons.join(", ") || "ok"}]`);
+      console.log(`  ${icon[p.state] ?? "·"} PR #${p.number} [${p.state}] — ${p.title}  (ci:${p.ciState}, ${p.ageHours}h)`);
     for (const i of issues)
-      console.log(`  ${i.needsAttention ? "\uD83D\uDCAC " : "✓ "}#${i.number} — ${i.title}${i.newComment ? `  (last: @${i.newComment.author})` : ""}`);
+      console.log(`  ${i.needsAttention ? "\uD83D\uDCAC" : "·"} #${i.number} — ${i.title}${i.newComment ? `  (last: @${i.newComment.author})` : ""}`);
   });
 }
 
 // src/commands/config.ts
-var KEYS = ["auto-issue", "live-reload"];
+var MERGE_POLICIES2 = ["manual", "auto-on-green", "auto-timeout"];
+var SETTINGS = [
+  {
+    key: "auto-issue",
+    field: "autoIssue",
+    set: (v, c) => String(c.autoIssue = parseBool(v)),
+    effective: resolveAutoIssue
+  },
+  {
+    key: "live-reload",
+    field: "liveReload",
+    set: (v, c) => String(c.liveReload = parseBool(v)),
+    effective: resolveLiveReload
+  },
+  {
+    key: "require-ci",
+    field: "requireCi",
+    set: (v, c) => String(c.requireCi = parseBool(v)),
+    effective: resolveRequireCi
+  },
+  {
+    key: "merge-policy",
+    field: "mergePolicy",
+    set: (v, c) => {
+      const p = v.trim();
+      if (!MERGE_POLICIES2.includes(p))
+        throw new Error(`merge-policy must be one of: ${MERGE_POLICIES2.join(", ")}`);
+      return c.mergePolicy = p;
+    },
+    effective: resolveMergePolicy
+  },
+  {
+    key: "max-fix-attempts",
+    field: "maxFixAttempts",
+    set: (v, c) => String(c.maxFixAttempts = parseIntOr(v, 3)),
+    effective: resolveMaxFixAttempts
+  },
+  {
+    key: "wip-limit",
+    field: "wipLimit",
+    set: (v, c) => String(c.wipLimit = parseIntOr(v, 3)),
+    effective: resolveWipLimit
+  },
+  {
+    key: "stale-pr-hours",
+    field: "stalePrHours",
+    set: (v, c) => String(c.stalePrHours = parseIntOr(v, 48)),
+    effective: resolveStalePrHours
+  }
+];
+var byKey = new Map(SETTINGS.map((s) => [s.key, s]));
+var KEYS = SETTINGS.map((s) => s.key);
+function unknownKey(key) {
+  console.error(`Unknown key: ${key} (supported: ${KEYS.join(", ")})`);
+  process.exit(1);
+}
 function registerConfigCommand(program2) {
   const config = program2.command("config").description("Get/set ShipFlow CLI preferences");
   config.command("set <key> <value>").description(`Set a preference. Keys: ${KEYS.join(", ")}`).action((key, value) => {
+    const s = byKey.get(key) ?? unknownKey(key);
     const cfg = loadConfig();
-    if (key === "auto-issue") {
-      cfg.autoIssue = parseBool(value);
-      saveConfig(cfg);
-      console.log(`auto-issue = ${cfg.autoIssue}`);
-      return;
+    let echo;
+    try {
+      echo = s.set(value, cfg);
+    } catch (e) {
+      console.error(e.message);
+      process.exit(1);
     }
-    if (key === "live-reload") {
-      cfg.liveReload = parseBool(value);
-      saveConfig(cfg);
-      console.log(`live-reload = ${cfg.liveReload}`);
-      return;
-    }
-    console.error(`Unknown key: ${key} (supported: ${KEYS.join(", ")})`);
-    process.exit(1);
+    saveConfig(cfg);
+    console.log(`${key} = ${echo}`);
   });
   config.command("get <key>").description("Read a preference (env vars override stored config)").option("--json", "Output JSON").action((key, opts) => {
-    if (key === "auto-issue") {
-      const v = resolveAutoIssue();
-      console.log(opts.json ? JSON.stringify({ autoIssue: v }) : String(v));
+    const s = byKey.get(key) ?? unknownKey(key);
+    const v = s.effective();
+    if (opts.json) {
+      console.log(JSON.stringify({ [s.field]: v ?? null }));
       return;
     }
-    if (key === "live-reload") {
-      const v = resolveLiveReload();
-      console.log(opts.json ? JSON.stringify({ liveReload: v ?? null }) : v === undefined ? "unset" : String(v));
-      return;
-    }
-    console.error(`Unknown key: ${key} (supported: ${KEYS.join(", ")})`);
-    process.exit(1);
+    console.log(v === undefined ? "unset" : String(v));
   });
   config.command("list").description("Show all preferences (effective values)").option("--json", "Output JSON").action((opts) => {
-    const liveReload = resolveLiveReload();
-    const settings = { autoIssue: resolveAutoIssue(), liveReload: liveReload ?? null };
     if (opts.json) {
-      console.log(JSON.stringify(settings, null, 2));
+      const obj = {};
+      for (const s of SETTINGS)
+        obj[s.field] = s.effective() ?? null;
+      console.log(JSON.stringify(obj, null, 2));
       return;
     }
-    console.log(`auto-issue: ${settings.autoIssue}`);
-    console.log(`live-reload: ${liveReload === undefined ? "unset" : liveReload}`);
+    for (const s of SETTINGS) {
+      const v = s.effective();
+      console.log(`${s.key}: ${v === undefined ? "unset" : v}`);
+    }
   });
 }
 
@@ -3442,6 +3697,112 @@ ${opts.body ?? ""}`;
       console.warn(`Merged but ShipFlow signal failed: ${e.message}`);
     }
     console.log(`merged: ${result.mergedSha}`);
+  });
+  pr.command("ready <number>").description("Report whether a PR is mergeable under the active merge policy (read-only — used by the loop)").option("--policy <p>", "Override merge policy: manual | auto-on-green | auto-timeout").option("--repo <fullname>", "Override target repo").option("--json", "Output JSON").action(async (numberStr, opts) => {
+    const ctx = await loadCtx2(program2);
+    const number = parseInt(numberStr, 10);
+    const repo = opts.repo ?? ctx.project.repoFullName;
+    const policy = opts.policy ?? resolveMergePolicy();
+    const staleHours = resolveStalePrHours();
+    const me = ghCurrentLogin();
+    const prView = ghPRView(repo, number);
+    const cl = classifyPR(prView, me, { staleHours });
+    const decision = mergeDecision(prView, me, { policy, requireCi: resolveRequireCi(), staleHours });
+    const out = {
+      number,
+      state: cl.state,
+      ciState: cl.ciState,
+      approved: cl.approved,
+      ageHours: Math.round(cl.ageHours),
+      policy,
+      wouldMerge: decision.wouldMerge,
+      blockers: decision.blockers
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(out, null, 2));
+      return;
+    }
+    console.log(`PR #${number}: ${cl.state} · ci=${cl.ciState} · approved=${cl.approved} · policy=${policy} → ${decision.wouldMerge ? "READY TO MERGE" : `not ready (${decision.blockers.join("; ")})`}`);
+  });
+  pr.command("automerge <number>").description("Merge a PR only if policy + CI + approval allow it; otherwise no-op and exit 5. The loop's safe auto-merge.").option("--policy <p>", "Override merge policy: manual | auto-on-green | auto-timeout").option("--mode <mode>", "squash | merge | rebase", "squash").option("--repo <fullname>", "Override target repo").option("--json", "Output JSON").action(async (numberStr, opts) => {
+    const ctx = await loadCtx2(program2);
+    const number = parseInt(numberStr, 10);
+    const repo = opts.repo ?? ctx.project.repoFullName;
+    const policy = opts.policy ?? resolveMergePolicy();
+    const staleHours = resolveStalePrHours();
+    const me = ghCurrentLogin();
+    const prView = ghPRView(repo, number);
+    const decision = mergeDecision(prView, me, { policy, requireCi: resolveRequireCi(), staleHours });
+    if (!decision.wouldMerge) {
+      if (opts.json) {
+        console.log(JSON.stringify({ number, merged: false, policy, blockers: decision.blockers }));
+      } else {
+        console.log(`⏸️  PR #${number} not auto-merged: ${decision.blockers.join("; ")}`);
+      }
+      process.exit(5);
+    }
+    const result = ghPRMerge(repo, number, opts.mode ?? "squash", true);
+    try {
+      await ctx.client.signal(ctx.creds.org, ctx.project.projectId, "prs", number, "merged", { repo, mergedSha: result.mergedSha });
+    } catch (e) {
+      console.warn(`Merged but ShipFlow signal failed: ${e.message}`);
+    }
+    const closed = (prView.closingIssuesReferences ?? []).map((i) => i.number);
+    for (const n of closed) {
+      try {
+        await ctx.client.signal(ctx.creds.org, ctx.project.projectId, "issues", n, "release-claim", { repo, reason: `merged via PR #${number}` });
+      } catch {}
+    }
+    if (opts.json) {
+      console.log(JSON.stringify({ number, merged: true, mergedSha: result.mergedSha, policy, closedIssues: closed }));
+      return;
+    }
+    console.log(`✅ Merged PR #${number} (${result.mergedSha}) under policy=${policy}${closed.length ? ` — closes #${closed.join(", #")}` : ""}.`);
+  });
+  pr.command("sync <number>").description("Rebase the PR's branch onto its (moved) base; aborts cleanly on conflict so the loop can escalate. Run on the PR's checked-out branch.").option("--repo <fullname>", "Override target repo").option("--no-push", "Don't force-with-lease push after a clean rebase").option("--json", "Output JSON").action(async (numberStr, opts) => {
+    const ctx = await loadCtx2(program2);
+    const number = parseInt(numberStr, 10);
+    const repo = opts.repo ?? ctx.project.repoFullName;
+    const prView = ghPRView(repo, number);
+    const base = prView.baseRefName;
+    const head = prView.headRefName;
+    if (!base) {
+      console.error(`PR #${number} has no base branch.`);
+      process.exit(1);
+    }
+    const cur = execSync3("git rev-parse --abbrev-ref HEAD").toString().trim();
+    if (cur !== head) {
+      console.error(`On branch "${cur}" but PR #${number} is "${head}". Check it out first: git checkout ${head}`);
+      process.exit(1);
+    }
+    execSync3(`git fetch origin ${base}`, { stdio: "ignore" });
+    let conflicted = false;
+    try {
+      execSync3(`git rebase origin/${base}`, { stdio: "pipe" });
+    } catch {
+      try {
+        execSync3("git rebase --abort", { stdio: "ignore" });
+      } catch {}
+      conflicted = true;
+    }
+    if (conflicted) {
+      if (opts.json) {
+        console.log(JSON.stringify({ number, rebased: false, conflict: true, base }));
+      } else {
+        console.log(`\uD83D\uDD00 PR #${number}: rebase onto ${base} conflicts — aborted. Resolve manually or escalate.`);
+      }
+      process.exit(6);
+    }
+    let pushed = false;
+    if (opts.push !== false) {
+      execSync3("git push --force-with-lease", { stdio: "ignore" });
+      pushed = true;
+    }
+    if (opts.json) {
+      console.log(JSON.stringify({ number, rebased: true, conflict: false, base, pushed }));
+      return;
+    }
+    console.log(`\uD83D\uDD00 PR #${number}: rebased "${head}" onto ${base}${pushed ? " and pushed" : ""}.`);
   });
 }
 async function loadCtx2(program2) {

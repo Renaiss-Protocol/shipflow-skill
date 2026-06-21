@@ -47,12 +47,17 @@ requests to the same CLI calls.
 | "auto-create issues" / "enable auto issue" | `renaiss-shipflow config set auto-issue true` |
 | "let me work on issue 42" / "pick up #42" | `renaiss-shipflow issue work 42 --json` |
 | "pick the next issue" / "what should I work on" | `renaiss-shipflow issue next --json` |
-| "what needs follow-up" / "any PR comments" / "check my open PRs" | `renaiss-shipflow inbox --json` |
+| "what needs follow-up" / "any PR comments" / "check my open PRs" | `renaiss-shipflow inbox --json` (classifies PRs by state) |
 | "loop through issues and fix them" / "auto-fix issues" / `/shipflow-loop` | Loop mode — read `references/loop-mode.md` |
+| "this issue needs a human" / "block / escalate #42" | `renaiss-shipflow issue escalate 42 --reason "..."` |
 | "I'm done with #42" / "release issue 42" | `renaiss-shipflow issue done 42` |
-| "attach a screenshot to #42" / "post test evidence" | `renaiss-shipflow issue evidence 42 --file shot.png --caption "..."` |
+| "attach a screenshot to #42" / "post test evidence" | `renaiss-shipflow issue evidence 42 --pr <pr> --file shot.png --caption "..."` |
 | "open a PR" / "send for review" | `renaiss-shipflow pr create --json` (after committing) |
-| "merge PR 87" | `renaiss-shipflow pr merge 87` |
+| "is PR 87 mergeable" / "can this auto-merge" | `renaiss-shipflow pr ready 87 --json` |
+| "auto-merge if ready" (loop) | `renaiss-shipflow pr automerge 87 --json` (self-gates on `merge-policy`) |
+| "rebase PR 87 onto its base" / "fix the conflict" | `renaiss-shipflow pr sync 87` (on the PR's branch) |
+| "merge PR 87" (explicit, human-confirmed) | `renaiss-shipflow pr merge 87` |
+| "set the loop's merge/CI/WIP policy" | `renaiss-shipflow config set merge-policy auto-on-green` (see `config list`) |
 | "run tests" | `renaiss-shipflow test` |
 | "run regression" / "trigger ShipFlow tests" | `renaiss-shipflow regression --json` |
 | "cut a release" / "release vX.Y.Z" | `renaiss-shipflow release --tag vX.Y.Z --json` |
@@ -82,8 +87,11 @@ the user opts into explicitly.
 ## Loop mode
 
 When the user explicitly asks to loop through and fix issues autonomously, read
-`references/loop-mode.md` and follow that cycle (pick → branch → fix → test →
-evidence → PR → release → repeat).
+`references/loop-mode.md` and follow it: a **reconciler** that each tick (A) drives
+every PR/issue you own toward `merged` — fixing CI, addressing review, gated
+`pr automerge`, escalating dead-ends — then (B) admits new work under the
+`wip-limit`. Behaviour is governed by the policy knobs in `config list`
+(`merge-policy` defaults to `manual`, so PRs park for a human).
 
 ## First run
 
