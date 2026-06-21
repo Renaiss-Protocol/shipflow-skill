@@ -23,12 +23,21 @@ silently installs any pending update at the start of each session. Combined with
 this preamble, updates get installed proactively — you don't run anything — and
 load **automatically on your next session**.
 
-**Opt-in same-session apply:** set `SHIPFLOW_LIVE_RELOAD=true` and the hook also
-refreshes the loaded plugin dir in place and emits `reloadSkills`, so new
-skills/commands apply in the **current** session (the gstack trick). Experimental
-— it leaves the version label stale until next session and may not pick up every
-change depending on Claude Code's reload scope; the default (next-session) path is
-the safe one.
+**Opt-in same-session apply (asked once):** the live-reload preference is
+tri-state — `renaiss-shipflow config get live-reload` is `true`, `false`, or
+`unset` (env `SHIPFLOW_LIVE_RELOAD` overrides). When it's **unset** and an update
+installs, the SessionStart hook adds a note asking you to decide **once**:
+
+> Ask the user whether to apply future ShipFlow updates in-session automatically
+> (experimental). Persist with `renaiss-shipflow config set live-reload true`
+> (or `false`). Then offer `/reload-plugins` to apply the current update now.
+
+When the agent sees that note, ask the user once and run the matching
+`config set live-reload …`; don't ask again after that. With `true`, the hook
+refreshes the loaded plugin dir in place and emits `reloadSkills` so new
+skills/commands apply in the **current** session (the gstack trick) — experimental:
+it leaves the version label stale until the next restart and may not pick up every
+change. `false` keeps the safe next-session default.
 
 ## Why the skill can't apply it *this* session
 

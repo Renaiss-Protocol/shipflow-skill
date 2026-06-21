@@ -2145,6 +2145,12 @@ function resolveAutoIssue() {
     return parseBool(process.env.SHIPFLOW_AUTO_ISSUE);
   return loadConfig().autoIssue === true;
 }
+function resolveLiveReload() {
+  const env = process.env.SHIPFLOW_LIVE_RELOAD;
+  if (env != null && env !== "")
+    return parseBool(env);
+  return loadConfig().liveReload;
+}
 function resolveApiUrl(flagUrl) {
   return flagUrl || process.env.SHIPFLOW_API_URL || loadConfig().apiUrl || "http://localhost:8080";
 }
@@ -3319,15 +3325,21 @@ function registerInboxCommand(program2) {
 }
 
 // src/commands/config.ts
-var KEYS = ["auto-issue"];
+var KEYS = ["auto-issue", "live-reload"];
 function registerConfigCommand(program2) {
   const config = program2.command("config").description("Get/set ShipFlow CLI preferences");
   config.command("set <key> <value>").description(`Set a preference. Keys: ${KEYS.join(", ")}`).action((key, value) => {
+    const cfg = loadConfig();
     if (key === "auto-issue") {
-      const cfg = loadConfig();
       cfg.autoIssue = parseBool(value);
       saveConfig(cfg);
       console.log(`auto-issue = ${cfg.autoIssue}`);
+      return;
+    }
+    if (key === "live-reload") {
+      cfg.liveReload = parseBool(value);
+      saveConfig(cfg);
+      console.log(`live-reload = ${cfg.liveReload}`);
       return;
     }
     console.error(`Unknown key: ${key} (supported: ${KEYS.join(", ")})`);
@@ -3339,16 +3351,23 @@ function registerConfigCommand(program2) {
       console.log(opts.json ? JSON.stringify({ autoIssue: v }) : String(v));
       return;
     }
+    if (key === "live-reload") {
+      const v = resolveLiveReload();
+      console.log(opts.json ? JSON.stringify({ liveReload: v ?? null }) : v === undefined ? "unset" : String(v));
+      return;
+    }
     console.error(`Unknown key: ${key} (supported: ${KEYS.join(", ")})`);
     process.exit(1);
   });
   config.command("list").description("Show all preferences (effective values)").option("--json", "Output JSON").action((opts) => {
-    const settings = { autoIssue: resolveAutoIssue() };
+    const liveReload = resolveLiveReload();
+    const settings = { autoIssue: resolveAutoIssue(), liveReload: liveReload ?? null };
     if (opts.json) {
       console.log(JSON.stringify(settings, null, 2));
       return;
     }
     console.log(`auto-issue: ${settings.autoIssue}`);
+    console.log(`live-reload: ${liveReload === undefined ? "unset" : liveReload}`);
   });
 }
 

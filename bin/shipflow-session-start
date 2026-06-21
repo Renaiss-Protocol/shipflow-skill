@@ -30,9 +30,17 @@ case "$UPD" in
     claude plugin update shipflow@renaissshipflow >/dev/null 2>&1 || true
     rm -f "${SHIPFLOW_STATE_DIR:-$HOME/.shipflow}/last-update-check" 2>/dev/null || true
 
+    # Live-reload preference (tri-state): env SHIPFLOW_LIVE_RELOAD wins, else the
+    # stored CLI config (renaiss-shipflow config set live-reload …), else unset.
+    PREF="${SHIPFLOW_LIVE_RELOAD:-}"
+    if [ -z "$PREF" ]; then
+      PREF="$(grep -o '"liveReload"[[:space:]]*:[[:space:]]*\(true\|false\)' "$HOME/.config/renaissshipflow/config.json" 2>/dev/null | grep -oE 'true|false' | head -1)"
+    fi
+    case "$PREF" in 1|true|yes|on|TRUE) PREF=true ;; 0|false|no|off|FALSE) PREF=false ;; *) PREF="" ;; esac
+
     reload=""
     note="active from your next session"
-    if [ "${SHIPFLOW_LIVE_RELOAD:-}" = "true" ]; then
+    if [ "$PREF" = "true" ]; then
       # Refresh the loaded dir in place from the freshly-installed version so a
       # skills re-scan picks up the new content this session.
       newdir="$(ls -d "$HOME"/.claude/plugins/cache/renaissshipflow/shipflow/*/ 2>/dev/null | sort -V | tail -1)"
@@ -42,6 +50,9 @@ case "$UPD" in
         reload=',"reloadSkills":true'
         note="applied to this session (live reload)"
       fi
+    elif [ -z "$PREF" ]; then
+      # Undecided: ask the user once whether to auto-apply updates in-session.
+      note="active from your next session. ONE-TIME SETUP: ask the user whether to apply future ShipFlow updates in-session automatically (experimental in-place reload) — persist their choice with: renaiss-shipflow config set live-reload true (or false). Offer /reload-plugins to apply this update now"
     fi
 
     printf '{"hookSpecificOutput":{"hookEventName":"SessionStart"%s,"additionalContext":"ShipFlow plugin auto-updated to %s — %s."}}\n' "$reload" "$NEW" "$note"
