@@ -25,12 +25,16 @@ Run this cycle, one item per iteration (all inside the loop worktree):
 1. **Reconcile open work first** — before picking anything new, run
    `renaiss-shipflow inbox --json` and clear it:
    - For each PR with `needsAttention` (`changes_requested`, `ci_failing`, or
-     `review_comments`): read it (`gh pr view <n> --comments`, `gh pr checks <n>`),
-     check out its branch, address the feedback / fix CI, push, and reply on the
-     PR summarizing what you changed.
+     `review_comments`): **work through every reviewer comment** and fix what you
+     can — follow `references/pr-feedback.md` (gather general + inline + review +
+     CI feedback, fix each actionable point on the branch, push, then **reply on
+     the PR** summarizing what you changed and asking about anything unclear).
    - For each in-progress issue with a `newComment`: read it
      (`gh issue view <n> --comments`) and act — answer the question, adjust the
      fix, or note it.
+   - **Comment when it adds signal**: reply to reviewers so they know what was
+     addressed; add a note on the linked **issue** when the feedback changes
+     scope/behavior or the reporter should know. Don't post empty "done" noise.
    - Only when the inbox is clear (nothing needs attention) move on to step 2.
 2. **Pick** — `renaiss-shipflow issue next --json` (claims the next open,
    unclaimed issue, ordered priority → severity → newest). Optional filters:
