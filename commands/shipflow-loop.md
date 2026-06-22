@@ -51,7 +51,17 @@ open PR into a `state`. Act, then re-run A until nothing `needsAttention`:
    --caption "Verified: …"` (PR comment + reporter thread). Do **not** `issue done` —
    the claim stays until the PR merges.
 
-**C. Repeat** A→B until PRs-this-run hits `cap` **and** A is clean.
+**C. Bug sweep — when the queue is empty** (B's `issue next` exits 4 **and** A is
+clean): if `bug-hunt` is on (default), run `renaiss-shipflow test` + `regression
+--json` + a real-browser QA sweep (`references/browser-testing.md`). For each bug
+you **reproduce** that isn't already an open issue (dedupe via `issues list
+--json`), file it: `renaiss-shipflow issue create --title "…" --body "<repro>"
+--label bug --label auto-qa --json` (+ attach evidence). Filed ≥1 new issue → back
+to **A**; nothing new → real stop. Cap: `bug-hunt-cap` (default 5); reproduced bugs
+only, never duplicates.
+
+**D. Repeat** A→B→C until PRs-this-run hits `cap`, **or** the queue is empty and the
+bug sweep found nothing new (or `bug-hunt` is off).
 
 **Guardrails:** `pr automerge` self-gates on `merge-policy` — it's the only merge
 path the loop uses; **never** bare `pr merge` or `release` without explicit

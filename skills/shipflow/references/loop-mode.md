@@ -37,6 +37,8 @@ Read them with `renaiss-shipflow config list`; set with `config set <key> <v>`
 | `max-fix-attempts` | `3` | CI-fix tries on one PR before escalating to a human |
 | `wip-limit` | `3` | max open PRs you own before you stop admitting new work |
 | `stale-pr-hours` | `48` | a green, unreviewed PR older than this is `stale` → ping/escalate |
+| `bug-hunt` | `true` | when the queue is empty, run a test+QA sweep and file issues for bugs found (Phase C) |
+| `bug-hunt-cap` | `5` | max NEW issues the bug sweep may file per run |
 
 The real merge guard is the repo's **GitHub branch protection** — even `auto-on-green`
 can't merge what GitHub blocks. Approval = a GitHub review approval **or** a
@@ -105,11 +107,38 @@ Do **not** `issue done` here — the PR isn't merged. The claim stays until the 
 merges (reconcile's `automerge` releases it, or a human merge does). This keeps
 the issue out of `issue next` while its PR is in flight.
 
-### C. Repeat
+### C. Bug sweep — when there's nothing left to fix, hunt for new bugs
 
-Loop A→B until **both**: PRs-opened-this-run has hit `cap` **and** nothing
-in-flight needs action (A is clean). `cap` precedence: a `cap=N` token the user
-passed (`cap=all` drains the queue), else `SHIPFLOW_LOOP_CAP`, else **5**.
+When B's `issue next` returns exit 4 / `issue: null` **and** A is clean (no PR
+needs action), don't stop yet. If `bug-hunt` is on (`config get bug-hunt`, default
+**true**), turn the idle time into QA that *refills* the queue:
+
+1. **Loop the tests** — run `renaiss-shipflow test` and `renaiss-shipflow
+   regression --json`, then a real-browser QA sweep of the main flows
+   (`references/browser-testing.md`: drive the key paths, watch for console errors,
+   broken UI, regressions). Capture screenshots of anything broken.
+2. **File genuine bugs as issues** — for each bug you can **actually reproduce**,
+   and that isn't already an open issue (dedupe via `renaiss-shipflow issues list
+   --json` — match by title/area; skip anything labelled `auto-qa` you already
+   filed), file it:
+   `renaiss-shipflow issue create --title "<bug>" --body "<repro + expected vs
+   actual>" --label bug --label auto-qa --json`. Attach evidence with
+   `issue evidence <n> --file <shot>`. **Only file what you reproduced** — no
+   speculative or duplicate issues.
+3. **Feed the loop**: if the sweep filed ≥1 new issue → **go back to A** (the loop
+   now fixes the bugs it just found). If it found **nothing new** (clean, or only
+   dupes) → *that's* the real stop.
+
+Bound it: file at most `bug-hunt-cap` new issues per run (default 5); the PR `cap`
+still applies to fixes. Turn it off with `config set bug-hunt false` (or
+`SHIPFLOW_BUG_HUNT=false`) — then an empty queue just stops.
+
+### D. Repeat / stop
+
+Loop A→B→C. The run ends only when PRs-opened-this-run has hit `cap`, **or** the
+queue is empty AND the bug sweep (C) surfaced nothing new (or `bug-hunt` is off).
+`cap` precedence: a `cap=N` token the user passed (`cap=all` drains the queue),
+else `SHIPFLOW_LOOP_CAP`, else **5**.
 
 ## Reconcile playbook (inbox `state` → action)
 
@@ -136,7 +165,10 @@ passed (`cap=all` drains the queue), else `SHIPFLOW_LOOP_CAP`, else **5**.
   others' PRs/issues unless asked.
 - Because blocked/escalated issues keep their claim and carry `needs-human`,
   `issue next` advances down the priority list. When B's pick returns null **and**
-  A is clean, the run is done.
+  A is clean, the bug sweep (C) runs; the run ends only once C also comes up empty.
+- **Bug sweep files real bugs only.** Phase C may only file an issue for a bug it
+  **reproduced**, never a duplicate of an open issue, always labelled `auto-qa`,
+  and at most `bug-hunt-cap` per run. It never files speculative/style nitpicks.
 - **At the cap or an empty queue:** summarize — PRs opened, merged (if policy
   allowed), parked-awaiting-review, and escalated (with reasons) — then ask
   whether to continue beyond the cap, raise the merge policy, or merge anything by

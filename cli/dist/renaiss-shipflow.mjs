@@ -2190,6 +2190,19 @@ function resolveStalePrHours() {
     return parseIntOr(env, 48);
   return parseIntOr(loadConfig().stalePrHours, 48);
 }
+function resolveBugHunt() {
+  const env = process.env.SHIPFLOW_BUG_HUNT;
+  if (env != null && env !== "")
+    return parseBool(env);
+  const c = loadConfig().bugHunt;
+  return c === undefined ? true : c;
+}
+function resolveBugHuntCap() {
+  const env = process.env.SHIPFLOW_BUG_HUNT_CAP;
+  if (env != null && env !== "")
+    return parseIntOr(env, 5);
+  return parseIntOr(loadConfig().bugHuntCap, 5);
+}
 function resolveApiUrl(flagUrl) {
   return flagUrl || process.env.SHIPFLOW_API_URL || loadConfig().apiUrl || "http://localhost:8080";
 }
@@ -2827,8 +2840,9 @@ function ghIssueView(repo, number) {
   const out = _exec(`gh issue view ${number} --repo ${shellQuote(repo)} --json ${FIELDS}`).toString();
   return JSON.parse(out);
 }
-function ghIssueCreate(repo, title, body) {
-  const out = _exec(`gh issue create --repo ${shellQuote(repo)} --title ${shellQuote(title)} --body ${shellQuote(body)} --json number,url`).toString();
+function ghIssueCreate(repo, title, body, labels = []) {
+  const labelFlags = labels.map((l) => `--label ${shellQuote(l)}`).join(" ");
+  const out = _exec(`gh issue create --repo ${shellQuote(repo)} --title ${shellQuote(title)} --body ${shellQuote(body)} ${labelFlags} --json number,url`).toString();
   return JSON.parse(out);
 }
 function ghIssueList(repo, state = "open", limit = 30) {
@@ -3156,12 +3170,19 @@ var IN_PROGRESS_LABEL = "\uD83E\uDD16 in-progress";
 var NEEDS_HUMAN_LABEL = "needs-human";
 function registerIssueCommand(program2) {
   const issue = program2.command("issue").description("Issue actions");
-  issue.command("create").description("Open a new issue (and signal ShipFlow)").option("--repo <fullname>", "Override target repo").option("--title <title>", "Issue title").option("--body <body>", "Issue body (- for stdin)").action(async (opts) => {
+  issue.command("create").description("Open a new issue (and signal ShipFlow)").option("--repo <fullname>", "Override target repo").option("--title <title>", "Issue title").option("--body <body>", "Issue body (- for stdin)").option("--label <name...>", "Label(s) to apply (created if missing) — e.g. bug auto-qa").option("--json", "Output JSON").action(async (opts) => {
     const ctx = await loadCtx(program2);
     const repo = opts.repo ?? ctx.project.repoFullName;
     const title = opts.title ?? await promptText("Title: ");
     const body = opts.body === "-" ? await readStdin() : opts.body ?? "";
-    const created = ghIssueCreate(repo, title, body);
+    const labels = opts.label ?? [];
+    for (const l of labels)
+      ghEnsureLabel(repo, l);
+    const created = ghIssueCreate(repo, title, body, labels);
+    if (opts.json) {
+      console.log(JSON.stringify({ number: created.number, url: created.url, labels }));
+      return;
+    }
     console.log(created.url);
   });
   issue.command("work <number>").description("Exclusively claim an issue (lock + dump context); exits 3 when another agent holds it").option("--repo <fullname>", "Override target repo").option("--agent <name>", "Agent label recorded on the claim (default: $SHIPFLOW_AGENT or hostname)").option("--ttl <minutes>", "Claim lifetime in minutes (default 120)").option("--json", "Output JSON").action(async (numberStr, opts) => {
@@ -3579,6 +3600,18 @@ var SETTINGS = [
     field: "stalePrHours",
     set: (v, c) => String(c.stalePrHours = parseIntOr(v, 48)),
     effective: resolveStalePrHours
+  },
+  {
+    key: "bug-hunt",
+    field: "bugHunt",
+    set: (v, c) => String(c.bugHunt = parseBool(v)),
+    effective: resolveBugHunt
+  },
+  {
+    key: "bug-hunt-cap",
+    field: "bugHuntCap",
+    set: (v, c) => String(c.bugHuntCap = parseIntOr(v, 5)),
+    effective: resolveBugHuntCap
   }
 ];
 var byKey = new Map(SETTINGS.map((s) => [s.key, s]));

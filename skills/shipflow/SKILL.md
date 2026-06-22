@@ -90,7 +90,9 @@ When the user explicitly asks to loop through and fix issues autonomously, read
 `references/loop-mode.md` and follow it: a **reconciler** that each tick (A) drives
 every PR/issue you own toward `merged` — fixing CI, addressing review, gated
 `pr automerge`, escalating dead-ends — then (B) admits new work under the
-`wip-limit`. Behaviour is governed by the policy knobs in `config list`
+`wip-limit`. When the queue empties, (C) a **bug sweep** runs the tests + a QA
+browser pass and files issues for reproduced bugs (`bug-hunt`, default on), so the
+loop is self-sustaining. Behaviour is governed by the policy knobs in `config list`
 (`merge-policy` defaults to `manual`, so PRs park for a human).
 
 ## First run
