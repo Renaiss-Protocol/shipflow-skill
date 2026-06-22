@@ -3755,9 +3755,8 @@ function registerPRCommand(program2) {
     const ctx = await loadCtx2(program2);
     const branch = currentBranch();
     const issueNumber = opts.issue ? parseInt(opts.issue, 10) : detectIssueFromBranch(branch);
-    const issue = issueNumber ? safeIssueView(ctx.project.repoFullName, issueNumber) : null;
-    const triage = issueNumber ? await ctx.client.getTriage(ctx.creds.org, ctx.project.projectId, ctx.project.repoFullName, issueNumber).catch(() => null) : null;
-    const header = buildShipFlowHeader(ctx.project.projectName, issueNumber, issue, triage);
+    const issueUrl = issueNumber ? `https://github.com/${ctx.project.repoFullName}/issues/${issueNumber}` : undefined;
+    const header = buildShipFlowHeader(ctx.project.projectName, issueNumber, issueUrl);
     const body = `${header}
 
 ${opts.body ?? ""}`;
@@ -3936,43 +3935,13 @@ function detectIssueFromBranch(branch) {
   const m = branch.match(/^(?:issue|fix|feat)\/(\d+)/);
   return m ? parseInt(m[1], 10) : undefined;
 }
-function safeIssueView(repo, n) {
-  try {
-    return ghIssueView(repo, n);
-  } catch {
-    return null;
-  }
-}
 function shellArg(s) {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
-function buildShipFlowHeader(project, issueNumber, issue, triage) {
+function buildShipFlowHeader(project, issueNumber, issueUrl) {
   const lines = ["## ShipFlow context", `- Project: ${project}`];
   if (issueNumber)
-    lines.push(`- Closes #${issueNumber}${issue?.title ? ` — ${issue.title}` : ""}`);
-  if (triage?.priority)
-    lines.push(`- Priority: ${triage.priority}`);
-  if (triage?.relatedFeatures?.length)
-    lines.push(`- Features impacted: ${triage.relatedFeatures.join(", ")}`);
-  const labels = (issue?.labels ?? []).map((l) => l.name).filter(Boolean);
-  if (labels.length)
-    lines.push(`- Labels: ${labels.join(", ")}`);
-  if (issue?.body && issue.body.trim()) {
-    const excerpt = issue.body.trim().slice(0, 800);
-    lines.push("", `### From issue #${issueNumber}`, excerpt + (issue.body.length > 800 ? " …" : ""));
-  }
-  const files = triage?.relatedFiles ?? [];
-  const commits = triage?.relatedCommits ?? [];
-  const relIssues = triage?.relatedIssues ?? [];
-  if (files.length || commits.length || relIssues.length) {
-    lines.push("", "### Related (ShipFlow triage)");
-    if (files.length)
-      lines.push(`- Files likely involved: ${files.slice(0, 10).join(", ")}`);
-    if (commits.length)
-      lines.push(`- Recent commits in this area: ${commits.slice(0, 5).join(", ")}`);
-    if (relIssues.length)
-      lines.push(`- Related issues: ${relIssues.map((i) => `#${i}`).join(", ")}`);
-  }
+    lines.push(issueUrl ? `- Closes #${issueNumber} — ${issueUrl}` : `- Closes #${issueNumber}`);
   return lines.join(`
 `);
 }

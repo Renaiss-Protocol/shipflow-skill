@@ -20,7 +20,7 @@ worktree (sequential) or a dedicated worktree (parallel mode).
    drive the fix, `snapshot -D` + no new console errors, capture before/after
    **screenshots** and Read them). Pure backend/library changes verify on tests alone.
 4. **PR** — commit, push, `renaiss-shipflow pr create --json` (body `Fixes #<n>`).
-   `pr create` pulls the full issue + triage into the PR body automatically.
+   `pr create` references the issue via `Closes #N` (a link, not a copy of the issue).
 5. **Evidence** — `renaiss-shipflow issue evidence <n> --pr <pr> --file <shot>
    --caption "Verified: <what>"`.
 

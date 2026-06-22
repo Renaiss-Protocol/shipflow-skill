@@ -120,8 +120,8 @@ PRs-opened-this-run < `cap`, admit ONE issue — each step a fresh subagent:
    In the loop worktree it: branches (`fix/issue-<n>-<slug>` off `origin/<default>`),
    fixes, runs project tests **and** an E2E browser pass with before/after
    screenshots (`references/browser-testing.md`), opens the PR with `renaiss-shipflow
-   pr create --json` (which **pulls the full issue + triage into the PR body**), and
-   attaches evidence (`issue evidence <n> --pr <pr> --file …`). Returns
+   pr create --json` (which **links the issue via `Closes #N`** — a reference, not a
+   copy of the issue), and attaches evidence (`issue evidence <n> --pr <pr> --file …`). Returns
    `{pr, verified, blocked}`. Unverified/blocked → `issue escalate`, no PR.
 4. **Reviewer — PR review** (mandatory). Dispatch the reviewer on the new PR with
    the brief. It pulls `features --json` + the diff and does a **whole-system

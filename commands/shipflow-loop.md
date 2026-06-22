@@ -51,8 +51,8 @@ subagent):
    --json`, validates + maps the issue to features, returns an acceptance brief.
    Reject (invalid/dup/needs-human) → `issue escalate` + next.
 3. **Worker — fix**: dispatch the worker with issue + triage + brief → branch, fix,
-   tests + **E2E browser** with before/after screenshots, `pr create --json` (pulls
-   the full issue into the PR body), `issue evidence <n> --pr <pr> --file …`. Returns
+   tests + **E2E browser** with before/after screenshots, `pr create --json` (links
+   the issue via `Closes #N`), `issue evidence <n> --pr <pr> --file …`. Returns
    `{pr, verified, blocked}`. Unverified/blocked → `issue escalate`, no PR.
 4. **Reviewer — PR review** (mandatory): dispatch the reviewer on the new PR; it
    pulls `features --json` + the diff for a whole-system review, posts it, then
