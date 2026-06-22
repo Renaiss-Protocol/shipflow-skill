@@ -6,7 +6,14 @@ Enter ShipFlow **Loop mode**: a reconciler that drives every issue/PR you own
 toward `merged`. The usual "don't auto-branch / auto-fix" guardrails are lifted.
 Full details: `references/loop-mode.md`. Honour the policy knobs (`renaiss-shipflow
 config list`): `merge-policy` (default `manual`), `require-ci`, `max-fix-attempts`,
-`wip-limit`, `stale-pr-hours`.
+`wip-limit`, `stale-pr-hours`, `require-review`.
+
+**You are the orchestrator.** Stay thin — read only compact JSON, and **dispatch
+each issue/PR to a fresh subagent** (Task tool) so context never bloats across
+items. Two roles: a **worker** fixes one item (`references/loop-worker.md`); the
+**reviewer** is a mandatory gate that pulls `renaiss-shipflow features --json` (the
+feature map) and reviews **every issue at intake and every PR before merge**
+(`references/loop-reviewer.md`).
 
 **Arguments** (`$ARGUMENTS`): a `cap=N` token = how many PRs to open before pausing
 (`cap=all` drains the queue); anything else is an `issue next` filter (e.g.
@@ -35,21 +42,23 @@ open PR into a `state`. Act, then re-run A until nothing `needsAttention`:
 - in-progress issue with a `newComment` → read (`gh issue view <n> --comments`) + act.
 
 **B. Admit new work only under the WIP limit** — if (open PRs you own) ≥
-`wip-limit`, skip B. Else while PRs-this-run < `cap`:
+`wip-limit`, skip B. Else while PRs-this-run < `cap`, admit ONE issue (each step a
+subagent):
 1. **Pick** — `renaiss-shipflow issue next --json` (priority→severity→newest; skips
-   `needs-human`/claimed). Exit 4 / `issue: null` → nothing to admit. Orient with
-   `triage.relatedFiles`/`relatedCommits`.
-2. **Branch** — `git fetch origin && git checkout -b fix/issue-<n>-<slug> origin/<default>`.
-3. **Fix** — investigate + change. Genuinely try to verify. Truly
-   risky/ambiguous/unreproducible → `renaiss-shipflow issue escalate <n> --reason "…"`
-   and continue (no PR, never stop).
-4. **Test** — project tests + **E2E in a real browser** for any UI/behavior change
-   (`bin/shipflow-browser`, `snapshot -D` + no new console errors, before/after
-   **screenshots**, Read them). Unverified → escalate, no PR.
-5. **PR** — commit, push, `renaiss-shipflow pr create --json` (body `Fixes #<n>`).
-6. **Evidence** — `renaiss-shipflow issue evidence <n> --pr <pr> --file <shot>
-   --caption "Verified: …"` (PR comment + reporter thread). Do **not** `issue done` —
-   the claim stays until the PR merges.
+   `needs-human`/claimed). Exit 4 / `issue: null` → nothing to admit. Dependency:
+   blocked-by an unmerged `#X` → `issue escalate` + next.
+2. **Reviewer — intake** (mandatory): dispatch the reviewer; it pulls `features
+   --json`, validates + maps the issue to features, returns an acceptance brief.
+   Reject (invalid/dup/needs-human) → `issue escalate` + next.
+3. **Worker — fix**: dispatch the worker with issue + triage + brief → branch, fix,
+   tests + **E2E browser** with before/after screenshots, `pr create --json` (pulls
+   the full issue into the PR body), `issue evidence <n> --pr <pr> --file …`. Returns
+   `{pr, verified, blocked}`. Unverified/blocked → `issue escalate`, no PR.
+4. **Reviewer — PR review** (mandatory): dispatch the reviewer on the new PR; it
+   pulls `features --json` + the diff for a whole-system review, posts it, then
+   **approve** → `renaiss-shipflow pr approve <pr> --comment "…"`, or **request
+   changes** → re-dispatch a worker, re-review. Do **not** `issue done` — the claim
+   stays until the PR merges.
 
 **C. Bug sweep — when the queue is empty** (B's `issue next` exits 4 **and** A is
 clean): if `bug-hunt` is on (default), run `renaiss-shipflow test` + `regression
@@ -63,8 +72,10 @@ only, never duplicates.
 **D. Repeat** A→B→C until PRs-this-run hits `cap`, **or** the queue is empty and the
 bug sweep found nothing new (or `bug-hunt` is off).
 
-**Guardrails:** `pr automerge` self-gates on `merge-policy` — it's the only merge
-path the loop uses; **never** bare `pr merge` or `release` without explicit
+**Guardrails:** the reviewer gate is mandatory — no PR is `approved_ready`/merged
+without the reviewer's `pr approve`. Orchestrator stays thin: dispatch subagents,
+never read source/diffs/logs yourself. `pr automerge` self-gates on `merge-policy` —
+it's the only merge path; **never** bare `pr merge` or `release` without explicit
 confirmation. Escalate, don't spin or pause mid-run. Act only on your own PRs/issues.
 At the cap or empty queue: summarize (opened / merged / parked / escalated with
 reasons) and ask whether to continue, raise the policy, or merge by hand.

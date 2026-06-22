@@ -48,12 +48,14 @@ requests to the same CLI calls.
 | "let me work on issue 42" / "pick up #42" | `renaiss-shipflow issue work 42 --json` |
 | "pick the next issue" / "what should I work on" | `renaiss-shipflow issue next --json` |
 | "what needs follow-up" / "any PR comments" / "check my open PRs" | `renaiss-shipflow inbox --json` (classifies PRs by state) |
+| "what features exist" / "feature map" / "system map" | `renaiss-shipflow features --json` |
 | "loop through issues and fix them" / "auto-fix issues" / `/shipflow-loop` | Loop mode — read `references/loop-mode.md` |
 | "this issue needs a human" / "block / escalate #42" | `renaiss-shipflow issue escalate 42 --reason "..."` |
 | "I'm done with #42" / "release issue 42" | `renaiss-shipflow issue done 42` |
 | "attach a screenshot to #42" / "post test evidence" | `renaiss-shipflow issue evidence 42 --pr <pr> --file shot.png --caption "..."` |
 | "open a PR" / "send for review" | `renaiss-shipflow pr create --json` (after committing) |
 | "is PR 87 mergeable" / "can this auto-merge" | `renaiss-shipflow pr ready 87 --json` |
+| "approve PR 87" (reviewer verdict) | `renaiss-shipflow pr approve 87 --comment "..."` (adds `shipflow-approved`) |
 | "auto-merge if ready" (loop) | `renaiss-shipflow pr automerge 87 --json` (self-gates on `merge-policy`) |
 | "rebase PR 87 onto its base" / "fix the conflict" | `renaiss-shipflow pr sync 87` (on the PR's branch) |
 | "merge PR 87" (explicit, human-confirmed) | `renaiss-shipflow pr merge 87` |
@@ -87,13 +89,16 @@ the user opts into explicitly.
 ## Loop mode
 
 When the user explicitly asks to loop through and fix issues autonomously, read
-`references/loop-mode.md` and follow it: a **reconciler** that each tick (A) drives
-every PR/issue you own toward `merged` — fixing CI, addressing review, gated
-`pr automerge`, escalating dead-ends — then (B) admits new work under the
-`wip-limit`. When the queue empties, (C) a **bug sweep** runs the tests + a QA
-browser pass and files issues for reproduced bugs (`bug-hunt`, default on), so the
-loop is self-sustaining. Behaviour is governed by the policy knobs in `config list`
-(`merge-policy` defaults to `manual`, so PRs park for a human).
+`references/loop-mode.md` and follow it. You act as a thin **orchestrator** that
+**dispatches each issue/PR to a fresh-context subagent** (Task tool) — so context
+never bloats across items. Each tick (A) drives every owned PR/issue toward
+`merged`, then (B) admits new work under the `wip-limit`; when the queue empties,
+(C) a **bug sweep** files issues for reproduced bugs (`bug-hunt`, self-sustaining).
+**Every issue (intake) and every PR (pre-merge) passes through the reviewer first**
+(`require-review`) — a subagent that pulls `renaiss-shipflow features --json` (the
+feature map) for a whole-system review and approves via `pr approve`. Roles:
+`references/loop-worker.md`, `references/loop-reviewer.md`. Governed by the policy
+knobs in `config list` (`merge-policy` defaults to `manual`).
 
 ## First run
 

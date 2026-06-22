@@ -2203,6 +2203,13 @@ function resolveBugHuntCap() {
     return parseIntOr(env, 5);
   return parseIntOr(loadConfig().bugHuntCap, 5);
 }
+function resolveRequireReview() {
+  const env = process.env.SHIPFLOW_REQUIRE_REVIEW;
+  if (env != null && env !== "")
+    return parseBool(env);
+  const c = loadConfig().requireReview;
+  return c === undefined ? true : c;
+}
 function resolveApiUrl(flagUrl) {
   return flagUrl || process.env.SHIPFLOW_API_URL || loadConfig().apiUrl || "http://localhost:8080";
 }
@@ -2439,6 +2446,9 @@ class ShipFlowClient {
   }
   async getProjectStatus(org, projectId) {
     return this.request("GET", `/api/v1/orgs/${encodeURIComponent(org)}/projects/${encodeURIComponent(projectId)}/status`);
+  }
+  async getFeatureMapping(org, projectId) {
+    return this.request("GET", `/api/v1/orgs/${encodeURIComponent(org)}/projects/${encodeURIComponent(projectId)}/feature-mapping`);
   }
 }
 
@@ -3551,6 +3561,50 @@ function registerInboxCommand(program2) {
   });
 }
 
+// src/commands/features.ts
+function registerFeaturesCommand(program2) {
+  program2.command("features").description("ShipFlow's feature map for this project (features → file paths/test info) — the reviewer's whole-system view").option("--json", "Output the raw feature map").option("--category <name>", "Filter to one category").action(async (opts) => {
+    const auth = resolveAuthToken();
+    const creds = loadCredentials();
+    if (!auth || !creds) {
+      console.error("Not signed in. Run: renaiss-shipflow login");
+      process.exit(1);
+    }
+    const client = new ShipFlowClient({ baseUrl: resolveApiUrl(program2.opts().apiUrl), jwt: auth.token, ...refreshOpts(creds) });
+    const project = await resolveProject(client, creds);
+    const fm = await client.getFeatureMapping(creds.org, project.projectId);
+    const features = fm.features ?? {};
+    const keys = Object.keys(features).filter((k) => !opts.category || (features[k].category ?? "") === opts.category);
+    if (opts.json) {
+      const out = opts.category ? { ...fm, features: Object.fromEntries(keys.map((k) => [k, features[k]])) } : fm;
+      console.log(JSON.stringify(out, null, 2));
+      return;
+    }
+    if (!keys.length) {
+      console.log("No feature map for this project yet. Generate it from the ShipFlow dashboard.");
+      return;
+    }
+    const byCat = new Map;
+    for (const k of keys) {
+      const cat = features[k].category || "uncategorized";
+      if (!byCat.has(cat))
+        byCat.set(cat, []);
+      byCat.get(cat).push(k);
+    }
+    console.log(`\uD83D\uDDFA️  Feature map — ${keys.length} feature(s)${fm.lastUpdated ? ` (updated ${fm.lastUpdated})` : ""}`);
+    for (const [cat, ks] of [...byCat].sort((a, b) => a[0].localeCompare(b[0]))) {
+      console.log(`
+${cat}`);
+      for (const k of ks.sort()) {
+        const f = features[k];
+        const paths = f.paths ?? [];
+        const shown = paths.slice(0, 3).join(", ");
+        console.log(`  • ${f.name || k}${f.test_priority ? ` [${f.test_priority}]` : ""}${shown ? ` — ${shown}${paths.length > 3 ? " …" : ""}` : ""}`);
+      }
+    }
+  });
+}
+
 // src/commands/config.ts
 var MERGE_POLICIES2 = ["manual", "auto-on-green", "auto-timeout"];
 var SETTINGS = [
@@ -3612,6 +3666,12 @@ var SETTINGS = [
     field: "bugHuntCap",
     set: (v, c) => String(c.bugHuntCap = parseIntOr(v, 5)),
     effective: resolveBugHuntCap
+  },
+  {
+    key: "require-review",
+    field: "requireReview",
+    set: (v, c) => String(c.requireReview = parseBool(v)),
+    effective: resolveRequireReview
   }
 ];
 var byKey = new Map(SETTINGS.map((s) => [s.key, s]));
@@ -3688,14 +3748,16 @@ function registerClaimsCommand(program2) {
 
 // src/commands/pr.ts
 import { execSync as execSync3 } from "node:child_process";
+var APPROVED_LABEL = "shipflow-approved";
 function registerPRCommand(program2) {
   const pr = program2.command("pr").description("Pull request actions");
   pr.command("create").description("Open a PR; prepends ShipFlow context to the body and signals ShipFlow").option("--issue <n>", "Issue number this PR closes (auto-detected from branch if omitted)").option("--title <title>", "PR title").option("--body <body>", "PR body (added under ShipFlow header)").option("--base <ref>", "Base branch").option("--draft", "Create as draft").option("--preview-url <url>", "Testing/preview site for this PR (relayed to the issue reporter)").option("--json", "Output JSON").action(async (opts) => {
     const ctx = await loadCtx2(program2);
     const branch = currentBranch();
     const issueNumber = opts.issue ? parseInt(opts.issue, 10) : detectIssueFromBranch(branch);
+    const issue = issueNumber ? safeIssueView(ctx.project.repoFullName, issueNumber) : null;
     const triage = issueNumber ? await ctx.client.getTriage(ctx.creds.org, ctx.project.projectId, ctx.project.repoFullName, issueNumber).catch(() => null) : null;
-    const header = buildShipFlowHeader(ctx.project.projectName, issueNumber, triage);
+    const header = buildShipFlowHeader(ctx.project.projectName, issueNumber, issue, triage);
     const body = `${header}
 
 ${opts.body ?? ""}`;
@@ -3837,6 +3899,24 @@ ${opts.body ?? ""}`;
     }
     console.log(`\uD83D\uDD00 PR #${number}: rebased "${head}" onto ${base}${pushed ? " and pushed" : ""}.`);
   });
+  pr.command("approve <number>").description("Record the loop reviewer's approval: adds the shipflow-approved label (the automerge approval source) + an optional comment").option("--comment <text>", "Reviewer summary to post on the PR").option("--repo <fullname>", "Override target repo").option("--json", "Output JSON").action(async (numberStr, opts) => {
+    const ctx = await loadCtx2(program2);
+    const number = parseInt(numberStr, 10);
+    const repo = opts.repo ?? ctx.project.repoFullName;
+    ghEnsureLabel(repo, APPROVED_LABEL, "0e8a16", "Reviewed and approved by the ShipFlow loop reviewer");
+    ghIssueAddLabels(repo, number, [APPROVED_LABEL]);
+    ghIssueRemoveLabel(repo, number, "needs-human");
+    if (opts.comment) {
+      execSync3(`gh pr comment ${number} --repo ${shellArg(repo)} --body ${shellArg(`✅ **Reviewer approved**
+
+${opts.comment}`)}`, { stdio: "ignore" });
+    }
+    if (opts.json) {
+      console.log(JSON.stringify({ number, approved: true, label: APPROVED_LABEL }));
+      return;
+    }
+    console.log(`✅ PR #${number} approved — labelled "${APPROVED_LABEL}" (automerge can proceed under an auto-* policy).`);
+  });
 }
 async function loadCtx2(program2) {
   const auth = resolveAuthToken();
@@ -3856,14 +3936,43 @@ function detectIssueFromBranch(branch) {
   const m = branch.match(/^(?:issue|fix|feat)\/(\d+)/);
   return m ? parseInt(m[1], 10) : undefined;
 }
-function buildShipFlowHeader(project, issue, triage) {
+function safeIssueView(repo, n) {
+  try {
+    return ghIssueView(repo, n);
+  } catch {
+    return null;
+  }
+}
+function shellArg(s) {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+function buildShipFlowHeader(project, issueNumber, issue, triage) {
   const lines = ["## ShipFlow context", `- Project: ${project}`];
-  if (issue)
-    lines.push(`- Closes #${issue}`);
+  if (issueNumber)
+    lines.push(`- Closes #${issueNumber}${issue?.title ? ` — ${issue.title}` : ""}`);
   if (triage?.priority)
-    lines.push(`- Triage priority: ${triage.priority}`);
+    lines.push(`- Priority: ${triage.priority}`);
   if (triage?.relatedFeatures?.length)
-    lines.push(`- Features: ${triage.relatedFeatures.join(", ")}`);
+    lines.push(`- Features impacted: ${triage.relatedFeatures.join(", ")}`);
+  const labels = (issue?.labels ?? []).map((l) => l.name).filter(Boolean);
+  if (labels.length)
+    lines.push(`- Labels: ${labels.join(", ")}`);
+  if (issue?.body && issue.body.trim()) {
+    const excerpt = issue.body.trim().slice(0, 800);
+    lines.push("", `### From issue #${issueNumber}`, excerpt + (issue.body.length > 800 ? " …" : ""));
+  }
+  const files = triage?.relatedFiles ?? [];
+  const commits = triage?.relatedCommits ?? [];
+  const relIssues = triage?.relatedIssues ?? [];
+  if (files.length || commits.length || relIssues.length) {
+    lines.push("", "### Related (ShipFlow triage)");
+    if (files.length)
+      lines.push(`- Files likely involved: ${files.slice(0, 10).join(", ")}`);
+    if (commits.length)
+      lines.push(`- Recent commits in this area: ${commits.slice(0, 5).join(", ")}`);
+    if (relIssues.length)
+      lines.push(`- Related issues: ${relIssues.map((i) => `#${i}`).join(", ")}`);
+  }
   return lines.join(`
 `);
 }
@@ -3986,6 +4095,7 @@ registerStatusCommand(program2);
 registerIssuesCommand(program2);
 registerIssueCommand(program2);
 registerInboxCommand(program2);
+registerFeaturesCommand(program2);
 registerConfigCommand(program2);
 registerClaimsCommand(program2);
 registerPRCommand(program2);
