@@ -133,7 +133,9 @@ PRs-opened-this-run < `cap`, admit ONE issue — each step a fresh subagent:
    Reviewer rejects (invalid / duplicate / needs a human) → `issue escalate` and
    pick the next. See `references/loop-reviewer.md`.
 3. **Worker — fix** Dispatch the worker subagent with the issue + triage + brief.
-   In the loop worktree it: branches (`fix/issue-<n>-<slug>` off `origin/<default>`),
+   It pulls the **feature map** itself (`features --json`) for file boundaries +
+   neighbouring features, so the heavy data stays in its context, not yours. In
+   the loop worktree it: branches (`fix/issue-<n>-<slug>` off `origin/<default>`),
    fixes, runs project tests **and** an E2E browser pass with before/after
    screenshots (`references/browser-testing.md`), opens the PR with `renaiss-shipflow
    pr create --json` (which **links the issue via `Closes #N`** — a reference, not a

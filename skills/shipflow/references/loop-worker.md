@@ -7,12 +7,21 @@ worktree (sequential) or a dedicated worktree (parallel mode).
 
 ## Input the orchestrator passes
 - `issue` number + the `triage` payload (relatedFiles / relatedCommits / features)
-- the reviewer's **acceptance brief** (what "done" means + features to regression-check)
+- the reviewer's **acceptance brief** (what "done" means + the feature(s) it touches
+  + features to regression-check)
 - repo, default branch, and the active policies (so it knows the test/CI bar)
+
+You also pull ShipFlow's **feature map** yourself (below) — that keeps the heavy
+data in your context, not the orchestrator's.
 
 ## What a fix worker does (one issue, end-to-end)
 1. **Branch** — `git fetch origin && git checkout -b fix/issue-<n>-<slug> origin/<default>`.
-2. **Fix** — investigate (start with the brief + `triage.relatedFiles`), make the
+2. **Map, then fix** — first pull the **feature map** for context:
+   `renaiss-shipflow features --json` (or `--category <area>` to scope to the
+   feature(s) the brief named). It gives each feature's **file paths**, **test
+   priority**, and the **neighbouring** features that share those paths. Stay
+   inside your feature's paths; if a change must touch a neighbour's, flag it for
+   the reviewer. Then investigate (brief + `triage.relatedFiles`) and make the
    change. Genuinely try to verify — start the dev server, seed a test DB;
    environmental friction is not grounds to abandon.
 3. **Test** — run the project's tests, then **verify end-to-end in a real browser**
@@ -30,7 +39,8 @@ open a PR — report `blocked` with the reason (the orchestrator will `issue esc
 ## What a reconcile worker does (one PR)
 Scoped to a single PR + the reason(s) from `inbox`: fix failing CI, or address
 review comments (`references/pr-feedback.md`) and reply, or `renaiss-shipflow pr
-sync <n>` to rebase a moved base. Push when done.
+sync <n>` to rebase a moved base. Pull `features --json` when a fix risks touching
+more than the PR's own feature (so you don't regress a neighbour). Push when done.
 
 ## Return (compact — this is all the orchestrator sees)
 ```json
