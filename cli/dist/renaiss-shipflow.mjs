@@ -2852,8 +2852,11 @@ function ghIssueView(repo, number) {
 }
 function ghIssueCreate(repo, title, body, labels = []) {
   const labelFlags = labels.map((l) => `--label ${shellQuote(l)}`).join(" ");
-  const out = _exec(`gh issue create --repo ${shellQuote(repo)} --title ${shellQuote(title)} --body ${shellQuote(body)} ${labelFlags} --json number,url`).toString();
-  return JSON.parse(out);
+  const out = _exec(`gh issue create --repo ${shellQuote(repo)} --title ${shellQuote(title)} --body ${shellQuote(body)} ${labelFlags}`).toString();
+  const url = out.split(`
+`).map((s) => s.trim()).filter(Boolean).reverse().find((l) => l.startsWith("http")) ?? out.trim();
+  const number = parseInt(url.split("/").pop() || "0", 10);
+  return { url, number };
 }
 function ghIssueList(repo, state = "open", limit = 30) {
   const out = _exec(`gh issue list --repo ${shellQuote(repo)} --state ${state} --limit ${limit} --json ${FIELDS}`).toString();
