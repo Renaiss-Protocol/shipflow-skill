@@ -26,16 +26,29 @@ Input: the issue + its `triage`. Produce an **acceptance brief**:
 ## Mode 2 — PR review (before merge)
 Input: the PR number + the acceptance brief. Pull `features --json` and the diff
 (`gh pr diff <n>`), then review against the **whole system**:
+
+0. **External reviews first — clear them before you approve.** Run
+   `renaiss-shipflow pr reviews <n> --json`. It lists **unresolved review threads**,
+   including async bot reviewers (gemini-code-assist, coderabbit). If `blocking` is
+   true (any unresolved external thread), you **cannot approve** — `pr approve`
+   itself refuses (exit 7) and the merge gate blocks. Verdict `request_changes`,
+   handing the orchestrator each thread to fix. External reviewers post a minute or
+   two *after* the PR opens, so if none have appeared yet, don't rush an approval —
+   let the next reconcile tick catch them.
 1. **Meets the brief?** Does the change satisfy the acceptance criteria.
 2. **Cross-feature impact** — does it touch paths owned by features *other* than
    the target? Could a co-located / shared-layer feature regress? Call those out.
 3. **Correctness / safety** — obvious bugs, missing tests for `test_priority: high`
    features, security/trust-boundary issues.
 4. Post the review on the PR (`gh pr comment <n> --body …`), then verdict:
-   - **approve** → `renaiss-shipflow pr approve <pr> --comment "<one-line summary>"`
-     (adds the `shipflow-approved` label — the automerge approval source).
-   - **request_changes** → list each required fix; the orchestrator re-dispatches a
-     worker, then re-reviews. **Do not approve until it passes.**
+   - **approve** — only when there are **no unresolved review threads**, it meets
+     the brief, and CI is green → `renaiss-shipflow pr approve <pr> --comment
+     "<one-line summary>"` (adds the `shipflow-approved` label — the automerge
+     approval source).
+   - **request_changes** → list each required fix (yours **and** every unresolved
+     external thread); the orchestrator re-dispatches a worker. After the worker
+     pushes the fix and **resolves the thread** (`renaiss-shipflow pr resolve <n>
+     --thread <id>`), re-review. **Do not approve until every thread is resolved.**
 
 (The reviewer and worker share one GitHub identity, so GitHub's native review
 approval is unavailable on own PRs — `pr approve` / the `shipflow-approved` label is

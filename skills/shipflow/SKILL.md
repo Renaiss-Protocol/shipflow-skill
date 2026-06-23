@@ -55,7 +55,9 @@ requests to the same CLI calls.
 | "attach a screenshot to #42" / "post test evidence" | `renaiss-shipflow issue evidence 42 --pr <pr> --file shot.png --caption "..."` |
 | "open a PR" / "send for review" | `renaiss-shipflow pr create --json` (after committing) |
 | "is PR 87 mergeable" / "can this auto-merge" | `renaiss-shipflow pr ready 87 --json` |
-| "approve PR 87" (reviewer verdict) | `renaiss-shipflow pr approve 87 --comment "..."` (adds `shipflow-approved`) |
+| "any open review comments on 87" / "external reviews" | `renaiss-shipflow pr reviews 87 --json` (unresolved threads incl. bots) |
+| "resolve the review threads I fixed" | `renaiss-shipflow pr resolve 87 --thread <id>` |
+| "approve PR 87" (reviewer verdict) | `renaiss-shipflow pr approve 87 --comment "..."` (refuses while threads are open) |
 | "auto-merge if ready" (loop) | `renaiss-shipflow pr automerge 87 --json` (self-gates on `merge-policy`) |
 | "rebase PR 87 onto its base" / "fix the conflict" | `renaiss-shipflow pr sync 87` (on the PR's branch) |
 | "merge PR 87" (explicit, human-confirmed) | `renaiss-shipflow pr merge 87` |
@@ -96,9 +98,12 @@ never bloats across items. Each tick (A) drives every owned PR/issue toward
 (C) a **bug sweep** files issues for reproduced bugs (`bug-hunt`, self-sustaining).
 **Every issue (intake) and every PR (pre-merge) passes through the reviewer first**
 (`require-review`) — a subagent that pulls `renaiss-shipflow features --json` (the
-feature map) for a whole-system review and approves via `pr approve`. Roles:
-`references/loop-worker.md`, `references/loop-reviewer.md`. Governed by the policy
-knobs in `config list` (`merge-policy` defaults to `manual`).
+feature map) for a whole-system review and approves via `pr approve`. Governed by
+the policy knobs in `config list` (`merge-policy` defaults to `manual`).
+
+Loop references: `references/loop-mode.md` (full playbook), `loop-worker.md` /
+`loop-reviewer.md` (subagent role contracts), `browser-testing.md` (the E2E test
+step), `pr-feedback.md` (resolving review threads).
 
 ## First run
 

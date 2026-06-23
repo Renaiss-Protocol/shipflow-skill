@@ -19,6 +19,18 @@ so context never bloats across many items and issues can't cross-contaminate. An
 pulls ShipFlow's feature map for a whole-system view before any fix ships. See the
 Roles section.
 
+## Contents
+
+1. **Setup** — one reusable worktree
+2. **Policies** — the knobs (`merge-policy`, `require-ci`, `max-fix-attempts`, `wip-limit`, `stale-pr-hours`, `bug-hunt`, `require-review`)
+3. **Roles** — orchestrator · reviewer · worker subagents
+4. **The cycle** — A reconcile in-flight · B admit new work · C bug sweep · D repeat/stop
+5. **Reconcile playbook** — inbox `state` → action
+6. **Guardrails**
+
+Sub-references: `loop-worker.md`, `loop-reviewer.md` (role contracts),
+`browser-testing.md` (E2E test step), `pr-feedback.md` (resolving review threads).
+
 ## Setup — run in a worktree (once, before the cycle)
 
 The loop **always** works in a git worktree, never in the user's live checkout.
@@ -85,12 +97,16 @@ that one PR and collect its return. Loop A until nothing in-flight `needsAttenti
 - `ci_failing` → worker fixes the failing checks (`gh pr checks <n>`) on the branch
   and pushes. Track attempts across ticks; after `max-fix-attempts` still red →
   `renaiss-shipflow issue escalate <issue> --reason "CI red after N attempts: …"`.
-- `changes_requested` / `review_comments` → worker addresses every comment
-  (`references/pr-feedback.md`), pushes, replies — **then re-dispatch the reviewer**
-  on the PR (the gate re-runs after any change). Ambiguous/conflicting → escalate.
+- `changes_requested` / `review_comments` → worker addresses every comment —
+  **including async external bot reviewers** (gemini-code-assist, coderabbit); list
+  them with `renaiss-shipflow pr reviews <n> --json`, fix each, push, reply, and
+  **resolve the thread** (`pr resolve <n> --thread <id>`). Then **re-dispatch the
+  reviewer** (the gate re-runs after any change). Ambiguous/conflicting → escalate.
 - `approved_ready` → the reviewer already added `shipflow-approved` (Phase B step 4)
   → `renaiss-shipflow pr automerge <n> --json` (merges only if `merge-policy` + CI +
-  approval allow; parks on `manual` — correct, not a failure).
+  approval allow **and no review thread is unresolved**; parks on `manual`). The
+  unresolved-thread block is a hard gate — an approved PR with an open bot comment
+  will not merge.
 - conflict → worker runs `renaiss-shipflow pr sync <n>` on the branch (exit 6 =
   unresolved → escalate).
 - `stale` → nudge once / escalate if blocked. `ci_pending` / `awaiting_review` →
@@ -124,13 +140,17 @@ PRs-opened-this-run < `cap`, admit ONE issue — each step a fresh subagent:
    copy of the issue), and attaches evidence (`issue evidence <n> --pr <pr> --file …`). Returns
    `{pr, verified, blocked}`. Unverified/blocked → `issue escalate`, no PR.
 4. **Reviewer — PR review** (mandatory). Dispatch the reviewer on the new PR with
-   the brief. It pulls `features --json` + the diff and does a **whole-system
-   review** (cross-feature impact, regressions in co-located features, meets the
-   brief), posts the review on the PR, and verdicts:
-   - **approve** → `renaiss-shipflow pr approve <pr> --comment "<summary>"` (adds
-     `shipflow-approved`). The PR is now `approved_ready` for A's automerge.
-   - **request changes** → it lists what's wrong; re-dispatch a worker to fix, then
-     re-review. Never approve until it passes.
+   the brief. It first checks **external reviews** (`renaiss-shipflow pr reviews <n>
+   --json` — unresolved threads incl. bot reviewers), then pulls `features --json` +
+   the diff for a **whole-system review** (cross-feature impact, regressions, meets
+   the brief), posts the review, and verdicts:
+   - **approve** — only with **no unresolved review threads**, brief met, CI green →
+     `renaiss-shipflow pr approve <pr> --comment "<summary>"` (adds `shipflow-approved`;
+     it refuses, exit 7, if any thread is still open). Now `approved_ready` for A.
+   - **request changes** → list every fix incl. each external thread; re-dispatch a
+     worker to fix + `pr resolve` the threads, then re-review. Never approve until
+     all threads are resolved. External reviewers are async — if none have posted
+     yet, leave the PR parked; A's next tick catches the late review.
 
 Do **not** `issue done` here — the claim stays until the PR merges (A's automerge
 releases it), keeping the issue out of `issue next` while its PR is in flight.

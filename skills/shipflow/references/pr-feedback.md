@@ -6,10 +6,14 @@ e.g. gemini-code-assist) know what happened. Only act on **your own** PRs.
 
 ## 1. Gather every comment — don't miss inline ones
 
-`gh pr view <n> --comments` shows general comments + review summaries, but **not
-line-level inline comments** — fetch those too:
+Start with `renaiss-shipflow pr reviews <n> --json` — it lists every **unresolved
+review thread** (with its node-`id`, author, path, and body), including async bot
+reviewers. Those threads are what block approval/merge, so they're the worklist.
+`gh pr view <n> --comments` shows general comments + review summaries but **not**
+line-level inline comments — fetch those too:
 
 ```bash
+renaiss-shipflow pr reviews <n> --json                      # unresolved threads (the worklist)
 gh pr view <n> --comments                                   # general + review bodies
 gh pr view <n> --json reviews,statusCheckRollup,headRefName # verdicts + CI + branch
 gh pr checks <n>                                            # CI status
@@ -47,8 +51,15 @@ If the feedback changes scope/behavior or the reporter should know, add a short
 note on the issue the PR closes:
 `gh issue comment <n> --body "Heads-up from review: …"`. Otherwise skip.
 
-## 6. Hand back for re-review
+## 6. Resolve the threads you addressed
+
+Once a thread's comment is fixed (and replied to), mark it resolved so it stops
+blocking approval/merge: `renaiss-shipflow pr resolve <n> --thread <id>` (ids from
+step 1's `pr reviews --json`). Only resolve threads you actually addressed.
+
+## 7. Hand back for re-review
 
 Pushing re-triggers reviewers that run on push. If a specific human review is
-needed, `gh pr edit <n> --add-reviewer <login>`. Never `gh pr merge` — merging
-needs explicit human confirmation.
+needed, `gh pr edit <n> --add-reviewer <login>`. The loop reviewer won't approve
+(and `pr automerge` won't merge) while any thread is unresolved. Never `gh pr
+merge` — merging needs explicit human confirmation.

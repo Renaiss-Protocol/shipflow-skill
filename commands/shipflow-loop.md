@@ -55,10 +55,14 @@ subagent):
    the issue via `Closes #N`), `issue evidence <n> --pr <pr> --file …`. Returns
    `{pr, verified, blocked}`. Unverified/blocked → `issue escalate`, no PR.
 4. **Reviewer — PR review** (mandatory): dispatch the reviewer on the new PR; it
-   pulls `features --json` + the diff for a whole-system review, posts it, then
-   **approve** → `renaiss-shipflow pr approve <pr> --comment "…"`, or **request
-   changes** → re-dispatch a worker, re-review. Do **not** `issue done` — the claim
-   stays until the PR merges.
+   checks external reviews (`renaiss-shipflow pr reviews <pr> --json` — unresolved
+   threads incl. bots like gemini-code-assist), pulls `features --json` + the diff
+   for a whole-system review, posts it, then **approve** (only with no unresolved
+   threads, brief met, CI green) → `renaiss-shipflow pr approve <pr> --comment "…"`
+   (refuses while threads are open), or **request changes** → re-dispatch a worker to
+   fix + `pr resolve` the threads, re-review. Do **not** `issue done` — the claim
+   stays until the PR merges. (`pr automerge` also hard-blocks while any thread is
+   unresolved.)
 
 **C. Bug sweep — when the queue is empty** (B's `issue next` exits 4 **and** A is
 clean): if `bug-hunt` is on (default), run `renaiss-shipflow test` + `regression

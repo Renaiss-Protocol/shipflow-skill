@@ -2924,6 +2924,29 @@ function ghIssueRemoveLabel(repo, number, label) {
 function ghIssueComment(repo, number, body) {
   _exec(`gh issue comment ${number} --repo ${shellQuote(repo)} --body ${shellQuote(body)}`, { stdio: "ignore" });
 }
+function ghReviewThreads(repo, number) {
+  const [owner, name] = repo.split("/");
+  const q = "query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){" + "reviewThreads(first:100){nodes{id isResolved comments(first:1){nodes{path line author{login} body}}}}}}}";
+  const out = _exec(`gh api graphql -f query=${shellQuote(q)} -f o=${shellQuote(owner)} -f r=${shellQuote(name)} -F n=${number}`).toString();
+  const nodes = JSON.parse(out)?.data?.repository?.pullRequest?.reviewThreads?.nodes ?? [];
+  return nodes.map((t) => {
+    const c = t.comments?.nodes?.[0] ?? {};
+    return {
+      id: String(t.id),
+      isResolved: !!t.isResolved,
+      path: c.path ?? "",
+      line: c.line ?? null,
+      author: c.author?.login ?? "",
+      body: (c.body ?? "").slice(0, 240)
+    };
+  });
+}
+function ghResolveReviewThread(threadId) {
+  const m = "mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}";
+  try {
+    _exec(`gh api graphql -f query=${shellQuote(m)} -f t=${shellQuote(threadId)}`, { stdio: "ignore" });
+  } catch {}
+}
 function shellQuote(s) {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
@@ -3477,6 +3500,8 @@ function mergeDecision(pr, me, opts) {
     blockers.push("no CI checks to confirm (set require-ci=false to allow)");
   if (pr.reviewDecision === "CHANGES_REQUESTED")
     blockers.push("changes requested");
+  if ((opts.unresolvedThreads ?? 0) > 0)
+    blockers.push(`${opts.unresolvedThreads} unresolved review thread(s) — address + resolve them first`);
   if ((pr.mergeable ?? "").toUpperCase() === "CONFLICTING")
     blockers.push("merge conflict with base (run: pr sync)");
   if (opts.policy === "auto-on-green" && !cl.approved) {
@@ -3804,12 +3829,14 @@ ${opts.body ?? ""}`;
     const me = ghCurrentLogin();
     const prView = ghPRView(repo, number);
     const cl = classifyPR(prView, me, { staleHours });
-    const decision = mergeDecision(prView, me, { policy, requireCi: resolveRequireCi(), staleHours });
+    const unresolvedThreads = ghReviewThreads(repo, number).filter((t) => !t.isResolved).length;
+    const decision = mergeDecision(prView, me, { policy, requireCi: resolveRequireCi(), staleHours, unresolvedThreads });
     const out = {
       number,
       state: cl.state,
       ciState: cl.ciState,
       approved: cl.approved,
+      unresolvedThreads,
       ageHours: Math.round(cl.ageHours),
       policy,
       wouldMerge: decision.wouldMerge,
@@ -3829,7 +3856,8 @@ ${opts.body ?? ""}`;
     const staleHours = resolveStalePrHours();
     const me = ghCurrentLogin();
     const prView = ghPRView(repo, number);
-    const decision = mergeDecision(prView, me, { policy, requireCi: resolveRequireCi(), staleHours });
+    const unresolvedThreads = ghReviewThreads(repo, number).filter((t) => !t.isResolved).length;
+    const decision = mergeDecision(prView, me, { policy, requireCi: resolveRequireCi(), staleHours, unresolvedThreads });
     if (!decision.wouldMerge) {
       if (opts.json) {
         console.log(JSON.stringify({ number, merged: false, policy, blockers: decision.blockers }));
@@ -3901,10 +3929,24 @@ ${opts.body ?? ""}`;
     }
     console.log(`\uD83D\uDD00 PR #${number}: rebased "${head}" onto ${base}${pushed ? " and pushed" : ""}.`);
   });
-  pr.command("approve <number>").description("Record the loop reviewer's approval: adds the shipflow-approved label (the automerge approval source) + an optional comment").option("--comment <text>", "Reviewer summary to post on the PR").option("--repo <fullname>", "Override target repo").option("--json", "Output JSON").action(async (numberStr, opts) => {
+  pr.command("approve <number>").description("Record the loop reviewer's approval: adds the shipflow-approved label (the automerge approval source) + an optional comment").option("--comment <text>", "Reviewer summary to post on the PR").option("--repo <fullname>", "Override target repo").option("--force", "Approve even with unresolved review threads (not recommended)").option("--json", "Output JSON").action(async (numberStr, opts) => {
     const ctx = await loadCtx2(program2);
     const number = parseInt(numberStr, 10);
     const repo = opts.repo ?? ctx.project.repoFullName;
+    const unresolved = ghReviewThreads(repo, number).filter((t) => !t.isResolved);
+    if (unresolved.length && !opts.force) {
+      const list = unresolved.map((t) => `  • ${t.author} ${t.path}:${t.line ?? "?"} — ${t.body.split(`
+`)[0].slice(0, 80)}`).join(`
+`);
+      if (opts.json) {
+        console.log(JSON.stringify({ number, approved: false, unresolvedThreads: unresolved.length }));
+      } else {
+        console.error(`⛔ Not approving PR #${number}: ${unresolved.length} unresolved review thread(s):
+${list}
+Address + resolve them (pr resolve), then approve (or --force).`);
+      }
+      process.exit(7);
+    }
     ghEnsureLabel(repo, APPROVED_LABEL, "0e8a16", "Reviewed and approved by the ShipFlow loop reviewer");
     ghIssueAddLabels(repo, number, [APPROVED_LABEL]);
     ghIssueRemoveLabel(repo, number, "needs-human");
@@ -3918,6 +3960,49 @@ ${opts.comment}`)}`, { stdio: "ignore" });
       return;
     }
     console.log(`✅ PR #${number} approved — labelled "${APPROVED_LABEL}" (automerge can proceed under an auto-* policy).`);
+  });
+  pr.command("reviews <number>").description("External review state: unresolved review threads (incl. bot reviewers) the loop must fix before approving").option("--repo <fullname>", "Override target repo").option("--json", "Output JSON").action(async (numberStr, opts) => {
+    const ctx = await loadCtx2(program2);
+    const number = parseInt(numberStr, 10);
+    const repo = opts.repo ?? ctx.project.repoFullName;
+    const me = ghCurrentLogin();
+    const threads = ghReviewThreads(repo, number);
+    const unresolved = threads.filter((t) => !t.isResolved);
+    const externalUnresolved = unresolved.filter((t) => t.author && t.author !== me);
+    const out = {
+      number,
+      blocking: externalUnresolved.length > 0,
+      unresolvedThreads: unresolved.length,
+      externalUnresolved: externalUnresolved.length,
+      reviewers: [...new Set(threads.map((t) => t.author).filter(Boolean))],
+      threads: unresolved.map((t) => ({ id: t.id, author: t.author, path: t.path, line: t.line, body: t.body }))
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(out, null, 2));
+      return;
+    }
+    if (!unresolved.length) {
+      console.log(`✅ PR #${number}: no unresolved review threads.`);
+      return;
+    }
+    console.log(`PR #${number}: ${unresolved.length} unresolved thread(s)${out.blocking ? " — BLOCKS approval/merge" : ""}`);
+    for (const t of unresolved)
+      console.log(`  • ${t.author} ${t.path}:${t.line ?? "?"} — ${t.body.split(`
+`)[0].slice(0, 90)}`);
+  });
+  pr.command("resolve <number>").description("Resolve review threads the loop has addressed (all unresolved, or specific --thread ids)").option("--thread <id...>", "Specific thread node-id(s) to resolve (default: all unresolved)").option("--repo <fullname>", "Override target repo").option("--json", "Output JSON").action(async (numberStr, opts) => {
+    const ctx = await loadCtx2(program2);
+    const number = parseInt(numberStr, 10);
+    const repo = opts.repo ?? ctx.project.repoFullName;
+    const unresolved = ghReviewThreads(repo, number).filter((t) => !t.isResolved);
+    const targets = opts.thread?.length ? unresolved.filter((t) => opts.thread.includes(t.id)) : unresolved;
+    for (const t of targets)
+      ghResolveReviewThread(t.id);
+    if (opts.json) {
+      console.log(JSON.stringify({ number, resolved: targets.length }));
+      return;
+    }
+    console.log(`\uD83E\uDDF5 Resolved ${targets.length} review thread(s) on PR #${number}.`);
   });
 }
 async function loadCtx2(program2) {
