@@ -213,6 +213,12 @@ else `SHIPFLOW_LOOP_CAP`, else **5**.
 - **Orchestrator context discipline:** dispatch, don't do. You read only compact
   JSON and one-line subagent returns — never open source files, diffs, or test logs
   in the main session. That's what lets the loop run `cap=all` without context bloat.
+- **Optional persistence:** the user can pair this loop with `/goal "drain the queue
+  and merge everything mergeable"` so the orchestrator won't stop early — belt-and-
+  suspenders on top of "run to the cap." `/goal` is an **orchestrator-only** tool —
+  never put a stop-hook/goal inside a subagent; subagents must *return* (via their
+  self-verify contract) for the loop to progress. Quality comes from the subagent's
+  completion contract + the reviewer gate, not from blocking a subagent's return.
 - **`pr automerge` is the only merge path the loop uses** — it self-gates on
   `merge-policy`. With the default `manual` it never merges; approved PRs pile up
   cleanly for a human. **Never** call bare `pr merge` or cut a `release` without

@@ -45,6 +45,19 @@ review comments (`references/pr-feedback.md`) and reply, or `renaiss-shipflow pr
 sync <n>` to rebase a moved base. Pull `features --json` when a fix risks touching
 more than the PR's own feature (so you don't regress a neighbour). Push when done.
 
+## Before you return — self-verify
+Your completion contract. Don't return until each holds (or you've genuinely hit a
+wall) — this, not a stop-hook, is what makes the result trustworthy:
+- [ ] Project tests pass **and** the E2E browser check genuinely verified the fix
+      (screenshots Read) — for UI/behaviour changes.
+- [ ] The change stayed inside the feature's paths (or you flagged a neighbour touch).
+- [ ] PR opened with `Fixes #<n>` and evidence attached to the PR.
+- [ ] You only set `blocked: true` after honestly trying to reproduce, start the dev
+      server, seed a test DB, and read git history — never on first friction.
+
+A `verified: true` you can't defend is worse than an honest `blocked` — the reviewer
+gate (and a re-dispatch) will catch a bluff anyway.
+
 ## Return (compact — this is all the orchestrator sees)
 ```json
 { "issue": 42, "pr": 87, "verified": true, "blocked": false,

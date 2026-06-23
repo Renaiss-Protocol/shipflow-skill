@@ -3951,9 +3951,7 @@ Address + resolve them (pr resolve), then approve (or --force).`);
     ghIssueAddLabels(repo, number, [APPROVED_LABEL]);
     ghIssueRemoveLabel(repo, number, "needs-human");
     if (opts.comment) {
-      execSync3(`gh pr comment ${number} --repo ${shellArg(repo)} --body ${shellArg(`✅ **Reviewer approved**
-
-${opts.comment}`)}`, { stdio: "ignore" });
+      execSync3(`gh pr comment ${number} --repo ${shellArg(repo)} --body ${shellArg(opts.comment)}`, { stdio: "ignore" });
     }
     if (opts.json) {
       console.log(JSON.stringify({ number, approved: true, label: APPROVED_LABEL }));

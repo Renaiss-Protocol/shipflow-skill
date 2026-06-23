@@ -40,19 +40,41 @@ Input: the PR number + the acceptance brief. Pull `features --json` and the diff
    the target? Could a co-located / shared-layer feature regress? Call those out.
 3. **Correctness / safety** — obvious bugs, missing tests for `test_priority: high`
    features, security/trust-boundary issues.
-4. Post the review on the PR (`gh pr comment <n> --body …`), then verdict:
-   - **approve** — only when there are **no unresolved review threads**, it meets
-     the brief, and CI is green → `renaiss-shipflow pr approve <pr> --comment
-     "<one-line summary>"` (adds the `shipflow-approved` label — the automerge
-     approval source).
-   - **request_changes** → list each required fix (yours **and** every unresolved
-     external thread); the orchestrator re-dispatches a worker. After the worker
-     pushes the fix and **resolves the thread** (`renaiss-shipflow pr resolve <n>
-     --thread <id>`), re-review. **Do not approve until every thread is resolved.**
+4. **Post ONE verdict comment — short + concrete.** No prose essay, no restating
+   the diff or commit SHAs. Bullets only, in this shape:
+
+   ```
+   **✅ APPROVE — ShipFlow review**   (or **🔴 CHANGES REQUESTED**)
+   - `path:line` — <≤8-word issue> [high|med]    ← one bullet per real point
+   - (none) → "No blocking issues."
+   Brief #<n> met ✓ · CI green · 0 open threads · features: cards, intake
+   ```
+
+   Then:
+   - **approve** (no unresolved threads, brief met, CI green) → `renaiss-shipflow
+     pr approve <pr> --comment "<that block>"` — it posts the comment **and** adds
+     `shipflow-approved`. Do **not** also post a separate review comment (one
+     comment, not two).
+   - **request_changes** → post the block with `gh pr comment <n> --body …` (the
+     bullets are the required fixes, incl. every unresolved external thread). The
+     orchestrator re-dispatches a worker; after it pushes + `pr resolve`s the
+     threads, re-review. **Never approve while a thread is open.**
 
 (The reviewer and worker share one GitHub identity, so GitHub's native review
 approval is unavailable on own PRs — `pr approve` / the `shipflow-approved` label is
 the approval channel, and the verdict is consumed in-loop by the orchestrator.)
+
+## Before you `approve` — self-verify
+Your completion contract. Never return `approve` unless **all** hold:
+- [ ] `renaiss-shipflow pr reviews <n>` shows **zero unresolved threads** (external
+      bots included).
+- [ ] The change meets the acceptance brief.
+- [ ] CI is green (or none is required) and you found no un-flagged cross-feature
+      regression risk.
+- [ ] You actually pulled `features --json` and checked the neighbouring features.
+
+When any is in doubt, return `request_changes`, not `approve` — a wrong approve
+ships a bug; a re-review is cheap.
 
 ## Return (compact)
 ```json
