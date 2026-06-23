@@ -3464,7 +3464,10 @@ function hoursSince(iso, nowMs = Date.now()) {
   return Math.max(0, (nowMs - t) / 3600000);
 }
 function classifyPR(pr, me, opts = {}) {
-  const reasons = prAttentionReasons(pr, me);
+  let reasons = prAttentionReasons(pr, me);
+  if (opts.unresolvedThreads === 0) {
+    reasons = reasons.filter((r) => r !== "review_comments");
+  }
   const ciState = ciStateOf(pr.statusCheckRollup);
   const approved = isApproved(pr);
   const ageHours = hoursSince(pr.updatedAt, opts.nowMs);
@@ -3529,7 +3532,8 @@ function registerInboxCommand(program2) {
     const me = ghCurrentLogin();
     const staleHours = resolveStalePrHours();
     const prs = ghPRListMine(repo).map((pr) => {
-      const cl = classifyPR(pr, me, { staleHours });
+      const unresolvedThreads = ghReviewThreads(repo, pr.number).filter((t) => !t.isResolved).length;
+      const cl = classifyPR(pr, me, { staleHours, unresolvedThreads });
       return {
         number: pr.number,
         title: pr.title,
@@ -3538,6 +3542,7 @@ function registerInboxCommand(program2) {
         url: pr.url,
         draft: pr.isDraft,
         reviewDecision: pr.reviewDecision || "none",
+        unresolvedThreads,
         closesIssues: (pr.closingIssuesReferences ?? []).map((i) => i.number),
         state: cl.state,
         ciState: cl.ciState,
