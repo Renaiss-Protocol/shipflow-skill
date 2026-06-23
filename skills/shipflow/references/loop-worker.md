@@ -21,9 +21,12 @@ data in your context, not the orchestrator's.
    feature(s) the brief named). It gives each feature's **file paths**, **test
    priority**, and the **neighbouring** features that share those paths. Stay
    inside your feature's paths; if a change must touch a neighbour's, flag it for
-   the reviewer. Then investigate (brief + `triage.relatedFiles`) and make the
-   change. Genuinely try to verify — start the dev server, seed a test DB;
-   environmental friction is not grounds to abandon.
+   the reviewer. Then investigate (brief + `triage.relatedFiles`). The worktree has
+   the **full git history** — use it: `git log -p -- <file>`, `git blame <file>`,
+   and `triage.relatedCommits` to see *why* code is the way it is and what changed
+   recently (essential for regressions / "it worked before" — `git log --since` /
+   bisect the suspect range). Then make the change. Genuinely try to verify — start
+   the dev server, seed a test DB; environmental friction is not grounds to abandon.
 3. **Test** — run the project's tests, then **verify end-to-end in a real browser**
    for any UI/behavior change (`references/browser-testing.md`: `bin/shipflow-browser`,
    drive the fix, `snapshot -D` + no new console errors, capture before/after
