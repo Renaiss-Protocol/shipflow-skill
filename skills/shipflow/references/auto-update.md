@@ -51,11 +51,27 @@ freshly-installed version can't take effect in the current session — no comman
 - **Immediately** — the user runs **`/reload-plugins`** (a manual command; the
   assistant cannot self-type it).
 
-Most behavior needs **no** reload anyway: the `renaiss-shipflow` **CLI is bundled
-and re-resolved from disk on each skill run** (the preamble symlinks the newest
-version), so CLI behavior (commands, ordering, inbox, config) updates **live**. A
-reload is only for **new/changed skill files** — added slash commands, edited
-loop steps, reference docs.
+Most behavior needs **no** reload anyway: the `renaiss-shipflow` **CLI auto-tracks
+the newest cached version**. The launcher (`bin/renaiss-shipflow`) resolves the
+**newest** installed plugin's bundled CLI at run time, and the preamble re-points
+its PATH symlink to the newest version every run — so once the SessionStart hook
+installs a new version to the cache, CLI behavior (commands, inbox, config, bug
+fixes) updates **live this session**, no reload. A reload is only for **new/changed
+skill files** — added slash commands, edited loop steps, reference docs.
+
+(Historical note: before this, the launcher ran its co-located CLI and the preamble
+only symlinked when none existed — so the symlink stranded on the first version
+forever, and the CLI never updated even as the plugin did. Fixed: launcher +
+preamble now always resolve/point to the newest cached version.)
+
+## Long-running sessions (e.g. an open `/shipflow-loop`)
+
+A long loop session never restarts, so it keeps the **skill files** it loaded at
+start — but its **CLI auto-updates** (above). If a bug fix is in the CLI (most are:
+commands, signals, mappings), it's already live. If it's in a skill/loop doc,
+periodically run **`/reload-plugins`** (or restart) to pick it up. When the update
+check shows a new version mid-loop, surface a one-line nudge:
+`⬆️ ShipFlow vX live (CLI auto-updated); /reload-plugins to also refresh skill docs.`
 
 If `claude plugin update` is unavailable or errors, tell the user to run
 `/shipflow-update` (or `claude plugin update shipflow@renaissshipflow`) manually,

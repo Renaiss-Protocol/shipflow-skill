@@ -11,12 +11,15 @@ Self-update check + ensure the bundled CLI is runnable (cached; ~no overhead):
 
 ```bash
 PLUGIN_DIR=$(ls -d ~/.claude/plugins/cache/renaissshipflow/shipflow/*/ 2>/dev/null | sort -V | tail -1)
-# The CLI ships inside the plugin — link it onto PATH (next to node, which is
-# already on PATH) so no separate `npm i -g` is needed. Skips if a global
-# renaiss-shipflow already exists.
-if [ -n "$PLUGIN_DIR" ] && ! command -v renaiss-shipflow >/dev/null 2>&1; then
+# Link the newest plugin's CLI launcher onto PATH (next to node). ALWAYS re-point
+# our own symlink to the newest cached version so the CLI never strands on an old
+# one; never clobber a real (non-symlink) global install.
+if [ -n "$PLUGIN_DIR" ]; then
   _ND=$(dirname "$(command -v node 2>/dev/null)" 2>/dev/null)
-  [ -n "$_ND" ] && ln -sf "$PLUGIN_DIR/bin/renaiss-shipflow" "$_ND/renaiss-shipflow" 2>/dev/null || true
+  _cur=$(command -v renaiss-shipflow 2>/dev/null || true)
+  if [ -n "$_ND" ] && { [ -z "$_cur" ] || { [ -L "$_cur" ] && readlink "$_cur" 2>/dev/null | grep -q '.claude/plugins/cache/renaissshipflow/'; }; }; then
+    ln -sf "$PLUGIN_DIR/bin/renaiss-shipflow" "$_ND/renaiss-shipflow" 2>/dev/null || true
+  fi
 fi
 [ -n "$PLUGIN_DIR" ] && "$PLUGIN_DIR/bin/shipflow-update-check" 2>/dev/null || true
 ```
