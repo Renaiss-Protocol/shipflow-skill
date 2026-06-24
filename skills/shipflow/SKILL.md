@@ -105,8 +105,9 @@ feature map) for a whole-system review and approves via `pr approve`. Governed b
 the policy knobs in `config list` (`merge-policy` defaults to `manual`).
 
 Loop references: `references/loop-mode.md` (full playbook), `loop-worker.md` /
-`loop-reviewer.md` (subagent role contracts), `browser-testing.md` (the E2E test
-step), `pr-feedback.md` (resolving review threads).
+`loop-reviewer.md` (subagent role contracts), `browser-testing.md` (E2E via the
+**gstack headed browser** — `bin/shipflow-browser --ensure` resolves + heals it),
+`pr-feedback.md` (resolving review threads).
 
 ## First run
 

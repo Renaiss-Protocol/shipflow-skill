@@ -5,28 +5,33 @@ before opening a PR. Modeled on gstack's `browse` + `/qa` flow. For UI/behavior
 changes this is the **required** verification; pure backend/library changes can
 verify with the project's own tests instead (but still capture relevant output).
 
-## 1. Resolve the browser
+## 1. Resolve + ensure a healthy browser
+
+ShipFlow drives the **gstack headed browser** (`browse`). Resolve *and* health-check
+it in one step:
 
 ```bash
-BROWSE="$("$PLUGIN_DIR/bin/shipflow-browser")" || { echo "$BROWSE"; }   # prefers gstack `browse`
+BROWSE="$("$PLUGIN_DIR/bin/shipflow-browser" --ensure)" || { echo "$BROWSE" >&2; exit 1; }
 ```
 
-If none is found, fall back to the project's own E2E runner (Playwright/Cypress)
-and still produce a screenshot. Never skip visual verification for a UI change.
+`--ensure` resolves gstack `browse` **and heals a wedged server** — the
+"Auth failed — server may have restarted" / stale-port state that `browse restart`
+can't recover on its own. It kills the stale server + its chromium so the next
+command respawns fresh; the chromium profile (cookies, auth, scroll) persists on
+disk, so nothing is lost. If gstack isn't installed, fall back to the project's own
+E2E runner (Playwright/Cypress) and still produce a screenshot — never skip visual
+verification for a UI change.
 
-## 2. Reuse the headed session, get the app URL
+## 2. Get the app under test running
 
-- Check first — **do not** relaunch if a healthy session exists:
-  ```bash
-  $BROWSE status      # reuse if Mode: headed and server healthy
-  ```
-  If status reports an unhealthy/stale server ("Auth failed — server may have
-  restarted", a dead port, or headless mode), reconnect before testing:
-  `$BROWSE disconnect 2>/dev/null; $BROWSE connect` (gstack), then re-check status.
-- Get the app under test running and its URL: a local dev server (start it if
-  needed, e.g. `npm run dev`), the PR's `--preview-url`, or production. Use the
-  page that the issue is about.
-- For auth-walled pages, import cookies once: `$BROWSE cookie-import-browser chrome --domain <domain>`.
+- The browser is already healthy (step 1 ensured it) — **reuse** the session, don't
+  relaunch.
+- Point it at the **running app** and its URL: a local dev server (start it if
+  needed, e.g. `npm run dev`), the PR's `--preview-url`, or production. Use the page
+  the issue is about.
+- For auth-walled pages, import cookies once:
+  `$BROWSE cookie-import-browser chrome --domain <domain>` (a one-time macOS
+  Keychain prompt the user approves).
 
 ## 3. Drive the fix end-to-end (before → after)
 

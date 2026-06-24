@@ -28,7 +28,7 @@ data in your context, not the orchestrator's.
    bisect the suspect range). Then make the change. Genuinely try to verify — start
    the dev server, seed a test DB; environmental friction is not grounds to abandon.
 3. **Test** — run the project's tests, then **verify end-to-end in a real browser**
-   for any UI/behavior change (`references/browser-testing.md`: `bin/shipflow-browser`,
+   for any UI/behavior change (`references/browser-testing.md`: `bin/shipflow-browser --ensure`,
    drive the fix, `snapshot -D` + no new console errors, capture before/after
    **screenshots** and Read them). Pure backend/library changes verify on tests alone.
 4. **PR** — commit, push, `renaiss-shipflow pr create --json` (body `Fixes #<n>`).
