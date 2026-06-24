@@ -107,7 +107,8 @@ the policy knobs in `config list` (`merge-policy` defaults to `manual`).
 Loop references: `references/loop-mode.md` (full playbook), `loop-worker.md` /
 `loop-reviewer.md` (subagent role contracts), `browser-testing.md` (E2E via the
 **gstack headed browser** — `bin/shipflow-browser --ensure` resolves + heals it),
-`pr-feedback.md` (resolving review threads).
+`bug-taxonomy.md` (severity × category + QA checklist), `qa-report.md` (health score
++ baseline), `pr-feedback.md` (resolving review threads).
 
 ## First run
 

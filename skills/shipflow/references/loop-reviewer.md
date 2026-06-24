@@ -38,16 +38,22 @@ Input: the PR number + the acceptance brief. Pull `features --json` and the diff
 1. **Meets the brief?** Does the change satisfy the acceptance criteria.
 2. **Cross-feature impact** — does it touch paths owned by features *other* than
    the target? Could a co-located / shared-layer feature regress? Call those out.
-3. **Correctness / safety** — obvious bugs, missing tests for `test_priority: high`
-   features, security/trust-boundary issues.
-4. **Post ONE verdict comment — short + concrete.** No prose essay, no restating
-   the diff or commit SHAs. Bullets only, in this shape:
+3. **Correctness / safety** — obvious bugs, **a missing regression test** for the
+   bug fixed (the worker should have added one), missing tests for `test_priority:
+   high` features, security/trust-boundary issues.
+4. **Health delta** — read it from the PR evidence caption (`health <a>→<b> (Δ)`,
+   see `references/qa-report.md`). A **negative delta** is a regression signal:
+   don't approve unless it's an intentional, explained tradeoff. Treat it like an
+   open thread — block the merge.
+5. **Post ONE verdict comment — short + concrete.** No prose essay, no restating
+   the diff or commit SHAs. Classify each finding by severity from
+   `references/bug-taxonomy.md`. Bullets only, in this shape:
 
    ```
    **✅ APPROVE — ShipFlow review**   (or **🔴 CHANGES REQUESTED**)
-   - `path:line` — <≤8-word issue> [high|med]    ← one bullet per real point
+   - `path:line` — <≤8-word issue> [critical|high|med|low]   ← one bullet per real point
    - (none) → "No blocking issues."
-   Brief #<n> met ✓ · CI green · 0 open threads · features: cards, intake
+   Brief #<n> met ✓ · CI green · 0 open threads · health Δ+4 · features: cards, intake
    ```
 
    Then:
@@ -71,6 +77,9 @@ Your completion contract. Never return `approve` unless **all** hold:
 - [ ] The change meets the acceptance brief.
 - [ ] CI is green (or none is required) and you found no un-flagged cross-feature
       regression risk.
+- [ ] The PR's **health delta is not negative** (or the drop is explained + accepted).
+- [ ] A regression test was added for the fixed bug (or skip is justified: pure-CSS /
+      no test framework).
 - [ ] You actually pulled `features --json` and checked the neighbouring features.
 
 When any is in doubt, return `request_changes`, not `approve` — a wrong approve

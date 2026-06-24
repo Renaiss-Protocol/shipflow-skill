@@ -29,12 +29,22 @@ data in your context, not the orchestrator's.
    the dev server, seed a test DB; environmental friction is not grounds to abandon.
 3. **Test** — run the project's tests, then **verify end-to-end in a real browser**
    for any UI/behavior change (`references/browser-testing.md`: `bin/shipflow-browser --ensure`,
-   drive the fix, `snapshot -D` + no new console errors, capture before/after
-   **screenshots** and Read them). Pure backend/library changes verify on tests alone.
-4. **PR** — commit, push, `renaiss-shipflow pr create --json` (body `Fixes #<n>`).
+   **scope the pass from the diff + adjacent pages**, drive the fix, `snapshot -D` +
+   no new console errors, capture before/after **screenshots** and Read them, and
+   **score** the affected + neighbour pages — `references/qa-report.md`, a dropped
+   neighbour score means you regressed it). Pure backend/library changes verify on
+   tests alone.
+4. **Regression test** — after the fix verifies, **add a test that locks it in**.
+   Trace the bug's codepath (what input/state triggered it, which branch broke),
+   then write ONE test matching the project's existing style (read 2–3 nearby test
+   files first — naming, imports, assertion style). Assert the *correct behavior*,
+   not "it renders". Run just that file; commit it with the fix. Skip only for
+   pure-CSS changes or when the project genuinely has no test framework (note it in
+   the return). An autonomous fix with no regression test silently regresses later.
+5. **PR** — commit, push, `renaiss-shipflow pr create --json` (body `Fixes #<n>`).
    `pr create` references the issue via `Closes #N` (a link, not a copy of the issue).
-5. **Evidence** — `renaiss-shipflow issue evidence <n> --pr <pr> --file <shot>
-   --caption "Verified: <what>"`.
+6. **Evidence** — `renaiss-shipflow issue evidence <n> --pr <pr> --file <shot>
+   --caption "Verified: <what> · health <before>→<after> (Δ<+/-N>)"`.
 
 If it's truly too risky / ambiguous / unreproducible / unverifiable, do **not**
 open a PR — report `blocked` with the reason (the orchestrator will `issue escalate`).
@@ -50,8 +60,11 @@ Your completion contract. Don't return until each holds (or you've genuinely hit
 wall) — this, not a stop-hook, is what makes the result trustworthy:
 - [ ] Project tests pass **and** the E2E browser check genuinely verified the fix
       (screenshots Read) — for UI/behaviour changes.
-- [ ] The change stayed inside the feature's paths (or you flagged a neighbour touch).
-- [ ] PR opened with `Fixes #<n>` and evidence attached to the PR.
+- [ ] A **regression test** for this bug is written, passing, and committed (or you
+      noted why it was skipped: pure-CSS / no test framework).
+- [ ] The change stayed inside the feature's paths (or you flagged a neighbour touch),
+      and **no neighbour page's health score dropped**.
+- [ ] PR opened with `Fixes #<n>` and evidence (with health delta) attached to the PR.
 - [ ] You only set `blocked: true` after honestly trying to reproduce, start the dev
       server, seed a test DB, and read git history — never on first friction.
 
@@ -61,8 +74,11 @@ gate (and a re-dispatch) will catch a bluff anyway.
 ## Return (compact — this is all the orchestrator sees)
 ```json
 { "issue": 42, "pr": 87, "verified": true, "blocked": false,
+  "regressionTest": "tests/foo.regression.test.ts" ,
+  "healthDelta": "+4",
   "summary": "one line: what changed + how it was verified",
   "reason": "" }
 ```
-Set `blocked: true` + `reason` when no PR was opened. Keep `summary` to one line —
-do not paste diffs or logs back to the orchestrator.
+Set `blocked: true` + `reason` when no PR was opened. `regressionTest` is the path
+(or `"skipped: <why>"`); `healthDelta` is the score change (or `"n/a"` for backend).
+Keep `summary` to one line — do not paste diffs or logs back to the orchestrator.

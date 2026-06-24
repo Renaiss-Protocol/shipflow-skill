@@ -29,7 +29,9 @@ Roles section.
 6. **Guardrails**
 
 Sub-references: `loop-worker.md`, `loop-reviewer.md` (role contracts),
-`browser-testing.md` (E2E test step), `pr-feedback.md` (resolving review threads).
+`browser-testing.md` (E2E test step), `bug-taxonomy.md` (severity × category +
+QA checklist — shared by sweep + reviewer), `qa-report.md` (health score + baseline),
+`pr-feedback.md` (resolving review threads).
 
 ## Setup — run in a worktree (once, before the cycle)
 
@@ -43,6 +45,14 @@ Use a **single** worktree, reused for every iteration (not one per issue):
 - If already in that worktree (resuming), reuse it — don't create another.
 - All branching, fixing, testing, committing, pushing happen inside this one
   worktree. At the end, surface its path + branch; clean it up only after merge.
+
+**Preflight — test baseline (once).** The loop enforces a test bar, so it needs one
+to exist. If the repo has **no test framework** (no `*.config`, no `test/`/`spec/`),
+dispatch a worker to bootstrap one before the cycle: research the right framework for
+the stack, install it, write 3–5 real tests for the most-changed files, wire a CI
+workflow, commit `chore: bootstrap test framework`. Skip if tests already exist or the
+user opted out. Without this, an untested greenfield repo has nothing for the worker's
+regression tests or the reviewer's CI gate to stand on.
 
 ## Policies — the three knobs (set once, then trust them)
 
@@ -136,11 +146,13 @@ PRs-opened-this-run < `cap`, admit ONE issue — each step a fresh subagent:
    It pulls the **feature map** itself (`features --json`) for file boundaries +
    neighbouring features, so the heavy data stays in its context, not yours. In
    the loop worktree it: branches (`fix/issue-<n>-<slug>` off `origin/<default>`),
-   fixes, runs project tests **and** an E2E browser pass with before/after
-   screenshots (`references/browser-testing.md`), opens the PR with `renaiss-shipflow
-   pr create --json` (which **links the issue via `Closes #N`** — a reference, not a
-   copy of the issue), and attaches evidence (`issue evidence <n> --pr <pr> --file …`). Returns
-   `{pr, verified, blocked}`. Unverified/blocked → `issue escalate`, no PR.
+   fixes, runs project tests **and** a diff-scoped E2E browser pass with before/after
+   screenshots + a **health score** (`references/browser-testing.md`), **adds a
+   regression test** for the bug, opens the PR with `renaiss-shipflow pr create --json`
+   (which **links the issue via `Closes #N`** — a reference, not a copy of the issue),
+   and attaches evidence with the health delta (`issue evidence <n> --pr <pr> --file …`).
+   Returns `{pr, verified, regressionTest, healthDelta, blocked}`. Unverified/blocked
+   → `issue escalate`, no PR.
 4. **Reviewer — PR review** (mandatory). Dispatch the reviewer on the new PR with
    the brief. It first checks **external reviews** (`renaiss-shipflow pr reviews <n>
    --json` — unresolved threads incl. bot reviewers), then pulls `features --json` +
@@ -163,20 +175,23 @@ When B's `issue next` returns exit 4 / `issue: null` **and** A is clean (no PR
 needs action), don't stop yet. If `bug-hunt` is on (`config get bug-hunt`, default
 **true**), turn the idle time into QA that *refills* the queue:
 
-1. **Loop the tests** (dispatch a QA subagent so its output stays out of your
+1. **Sweep methodically** (dispatch a QA subagent so its output stays out of your
    context) — run `renaiss-shipflow test` and `renaiss-shipflow regression --json`,
-   then a real-browser QA sweep of the main flows (`references/browser-testing.md`:
-   drive the key paths, watch for console errors, broken UI, regressions); use
-   `renaiss-shipflow features --json` to prioritise `high` `test_priority` features.
-   Capture screenshots of anything broken.
-2. **File genuine bugs as issues** — for each bug you can **actually reproduce**,
-   and that isn't already an open issue (dedupe via `renaiss-shipflow issues list
-   --json` — match by title/area; skip anything labelled `auto-qa` you already
-   filed), file it:
-   `renaiss-shipflow issue create --title "<bug>" --body "<repro + expected vs
-   actual>" --label bug --label auto-qa --json`. Attach evidence with
-   `issue evidence <n> --file <shot>`. **Only file what you reproduced** — no
-   speculative or duplicate issues.
+   then a real-browser QA sweep. Use `renaiss-shipflow features --json` to prioritise
+   `high` `test_priority` features, and run the **per-page checklist** on each
+   (`references/bug-taxonomy.md` §4: click everything, fill forms, check empty/error
+   states, console after each interaction, responsive, auth boundaries). Compute the
+   **health score** and diff it against the stored baseline (`references/qa-report.md`)
+   — a score drop since last sweep means something regressed. Screenshot anything broken.
+2. **File genuine bugs as issues** — for each bug you can **actually reproduce**
+   (retry once to confirm), classified with a **severity + category** from the
+   taxonomy, and not already an open issue (dedupe via `renaiss-shipflow issues list
+   --json` — match by title/area; skip anything labelled `auto-qa` you already filed):
+   `renaiss-shipflow issue create --title "<bug>" --body "<repro + expected vs actual>"
+   --label bug --label auto-qa --label "severity:<…>" --label "area:<…>" --json`
+   (`bug-taxonomy.md` §3). Attach evidence with `issue evidence <n> --file <shot>`,
+   and update the baseline. **Only file what you reproduced** — no speculative or
+   duplicate issues.
 3. **Feed the loop**: if the sweep filed ≥1 new issue → **go back to A** (the loop
    now fixes the bugs it just found). If it found **nothing new** (clean, or only
    dupes) → *that's* the real stop.
@@ -234,6 +249,16 @@ else `SHIPFLOW_LOOP_CAP`, else **5**.
 - **Bug sweep files real bugs only.** Phase C may only file an issue for a bug it
   **reproduced**, never a duplicate of an open issue, always labelled `auto-qa`,
   and at most `bug-hunt-cap` per run. It never files speculative/style nitpicks.
+- **Self-regulate — WTF-likelihood.** Beyond the flat caps, watch a running signal
+  that the loop is thrashing. Start at 0%; add +15% per revert, +20% when a fix
+  touches files unrelated to its issue, +5% per fix touching >3 files, +10% if all
+  that's left is `low` severity. **Above ~20% → stop and summarize** instead of
+  pressing on; a high revert rate or unrelated-file churn means the loop is guessing.
+  This is a smarter brake than `max-fix-attempts` alone, which only counts retries on
+  one PR.
+- **Health gate on merge.** A PR whose evidence shows a **negative health delta**
+  (`references/qa-report.md`) is treated like an unresolved thread: the reviewer
+  won't approve it and `pr automerge` won't merge it, regardless of `merge-policy`.
 - **At the cap or an empty queue:** summarize — PRs opened, merged (if policy
   allowed), parked-awaiting-review, and escalated (with reasons) — then ask
   whether to continue beyond the cap, raise the merge policy, or merge anything by
