@@ -17,7 +17,10 @@ paths/layers (those are the regression risk).
 ## Mode 1 — issue intake (before any worker touches it)
 Input: the issue + its `triage`. Produce an **acceptance brief**:
 1. **Valid?** Real, actionable, not a duplicate of an open issue, not missing
-   info. If not → verdict `reject` with a reason (orchestrator escalates).
+   info. If not → verdict `reject` with a reason (orchestrator escalates). Write
+   the reason **scannably** — a one-line TL;DR, then short bullets (what's
+   blocked · what *was* decidable · the human decision needed) — not a dense
+   paragraph; it becomes the `issue escalate --reason` a human reads.
 2. **Feature mapping** — which feature(s) from the map this issue touches (by path
    overlap with `triage.relatedFiles` + description). Note cross-feature blast radius.
 3. **Acceptance criteria** — what "done" means, and which features to

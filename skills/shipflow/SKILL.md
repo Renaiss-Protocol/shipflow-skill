@@ -63,7 +63,7 @@ requests to the same CLI calls.
 | "approve PR 87" (reviewer verdict) | `renaiss-shipflow pr approve 87 --comment "..."` (refuses while threads are open) |
 | "auto-merge if ready" (loop) | `renaiss-shipflow pr automerge 87 --json` (self-gates on `merge-policy`) |
 | "rebase PR 87 onto its base" / "fix the conflict" | `renaiss-shipflow pr sync 87` (on the PR's branch) |
-| "merge PR 87" (explicit, human-confirmed) | `renaiss-shipflow pr merge 87` |
+| "merge PR 87" (explicit, human-confirmed) | `renaiss-shipflow pr merge 87` (squash by default; deletes the **remote** branch) — then clean up **local** leftovers: if in a worktree, run `git worktree remove <its-worktree>`; otherwise switch to the default branch first, then `git branch -D <its-branch>` (use `-D`: a squash merge leaves the branch looking "unmerged") |
 | "set the loop's merge/CI/WIP policy" | `renaiss-shipflow config set merge-policy auto-on-green` (see `config list`) |
 | "run tests" | `renaiss-shipflow test` |
 | "run regression" / "trigger ShipFlow tests" | `renaiss-shipflow regression --json` |

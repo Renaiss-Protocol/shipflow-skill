@@ -44,7 +44,13 @@ Use a **single** worktree, reused for every iteration (not one per issue):
   (ensure `.worktrees/` is gitignored) and `cd` into it.
 - If already in that worktree (resuming), reuse it — don't create another.
 - All branching, fixing, testing, committing, pushing happen inside this one
-  worktree. At the end, surface its path + branch; clean it up only after merge.
+  worktree. **Cleanup:** merged `fix/issue-*` branches are pruned automatically
+  at merge time by `pr automerge`/`pr merge` (remote via gh `--delete-branch`,
+  local via a force-prune that detaches HEAD if the worktree is on the branch).
+  At run end — only once no PRs you own are still in flight — tear the worktree
+  down: `ExitWorktree`, else `cd` out and `git worktree remove
+  .worktrees/shipflow-loop` + `git branch -D shipflow-loop/base`. Surface its
+  path + branch first; keep it if you're only pausing/resuming.
 
 **Preflight — test baseline (once).** The loop enforces a test bar, so it needs one
 to exist. If the repo has **no test framework** (no `*.config`, no `test/`/`spec/`),
@@ -65,7 +71,7 @@ Read them with `renaiss-shipflow config list`; set with `config set <key> <v>`
 | `merge-policy` | `manual` | `manual` = never auto-merge (park for a human) · `auto-on-green` = merge when CI green **and** approved · `auto-timeout` = green + no objection past `stale-pr-hours` |
 | `require-ci` | `true` | CI must be green before a PR is "advanced" / merged |
 | `max-fix-attempts` | `3` | CI-fix tries on one PR before escalating to a human |
-| `wip-limit` | `3` | max open PRs you own before you stop admitting new work |
+| `wip-limit` | `10` | max open PRs you own before you stop admitting new work |
 | `stale-pr-hours` | `48` | a green, unreviewed PR older than this is `stale` → ping/escalate |
 | `bug-hunt` | `true` | when the queue is empty, run a test+QA sweep and file issues for bugs found (Phase C) |
 | `bug-hunt-cap` | `5` | max NEW issues the bug sweep may file per run |
@@ -124,7 +130,14 @@ that one PR and collect its return. Loop A until nothing in-flight `needsAttenti
 
 A PR becomes `approved_ready` **only** because the reviewer approved it — never
 hand-add `shipflow-approved`. For each in-progress issue with a `newComment`, a
-worker reads + acts.
+worker reads + acts. **A human reply on a `needs-human` issue** — a new comment from
+a person, i.e. not one of the loop's own `🚧 **Needs a human**` / evidence comments —
+is the **decision that unblocks it**: remove the `needs-human` label, bake the
+human's guidance into the acceptance brief as a settled decision, and hand it
+straight to a worker (Phase B step 3); the reviewer then gates the resulting PR
+(step 4). Do **not** re-run the intake validity gate or re-escalate the question the
+human just answered. (A reply that's only a question/chatter with no decision stays
+escalated.)
 
 ### B. Admit new work — under the WIP limit, every issue reviewed first
 
@@ -241,11 +254,18 @@ else `SHIPFLOW_LOOP_CAP`, else **5**.
 - **Escalate, don't spin.** A single hard/blocked/unverifiable item →
   `issue escalate` (labels `needs-human`, keeps the claim, comments why) and move
   on. It never ends the run; you never pause mid-run to ask for direction.
+  Write `--reason` to be **read by a human**, not as a dense paragraph: lead with
+  a one-line TL;DR, then a few short bullets (what's blocked · what *was*
+  decidable · the decision you need). `issue escalate` adds the heading + the
+  "what happens next" footer around it — so just supply scannable markdown.
 - Reconcile (A) acts only on **your own** PRs and claimed issues. Don't touch
   others' PRs/issues unless asked.
 - Because blocked/escalated issues keep their claim and carry `needs-human`,
-  `issue next` advances down the priority list. When B's pick returns null **and**
-  A is clean, the bug sweep (C) runs; the run ends only once C also comes up empty.
+  `issue next` advances down the priority list. **A human reply on such an issue
+  brings it back in** via Phase A — treat the reply as the decision, drop
+  `needs-human`, and implement it; don't re-escalate the question they answered.
+  When B's pick returns null **and** A is clean, the bug sweep (C) runs; the run
+  ends only once C also comes up empty.
 - **Bug sweep files real bugs only.** Phase C may only file an issue for a bug it
   **reproduced**, never a duplicate of an open issue, always labelled `auto-qa`,
   and at most `bug-hunt-cap` per run. It never files speculative/style nitpicks.
@@ -263,4 +283,18 @@ else `SHIPFLOW_LOOP_CAP`, else **5**.
   allowed), parked-awaiting-review, and escalated (with reasons) — then ask
   whether to continue beyond the cap, raise the merge policy, or merge anything by
   hand. Releasing escalated claims and any `pr merge`/`release` still need explicit
-  confirmation.
+  confirmation. (That "ask" applies only to a `once`/single-pass run; **by default
+  the loop is continuous** — don't ask, post the one-line summary and end the turn,
+  leaving the recurring trigger to resume the next pass after its dormancy.)
+- **Continuous mode (default).** `/shipflow-loop` keeps the loop running: one full
+  pass, then **dormant ~15 min**, then another pass, indefinitely — so new issues /
+  PR-CI changes are picked up without re-invoking. At the start of the run, create a
+  recurring trigger (default every 15 min, an off-`:00`/`:30` minute) that re-fires
+  `/shipflow-loop`, then run the first pass now; re-entry is idempotent (a tick sees
+  the existing trigger and skips re-creating it, so they never stack), and each tick
+  is an unattended pass that ends without asking (empty queue is fine — it keeps
+  checking). `/shipflow-loop once` runs a single pass with no trigger; stop an active
+  loop with `/shipflow-loop stop` (delete the trigger), then do the worktree cleanup.
+  The trigger fires only while Claude Code is running/idle and may be session-scoped
+  (cmux) with a ~7-day expiry; for a true always-on reconciler use an external
+  scheduler (cron / launchd / GitHub Actions) driving `/shipflow-loop once`.

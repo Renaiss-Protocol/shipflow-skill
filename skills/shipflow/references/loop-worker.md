@@ -43,8 +43,10 @@ data in your context, not the orchestrator's.
    the return). An autonomous fix with no regression test silently regresses later.
 5. **PR** — commit, push, `renaiss-shipflow pr create --json` (body `Fixes #<n>`).
    `pr create` references the issue via `Closes #N` (a link, not a copy of the issue).
-6. **Evidence** — `renaiss-shipflow issue evidence <n> --pr <pr> --file <shot>
-   --caption "Verified: <what> · health <before>→<after> (Δ<+/-N>)"`.
+6. **Evidence** — `renaiss-shipflow issue evidence <n> --pr <pr> --before <before.png>
+   --after <after.png> --caption "Verified: <what> · health <before>→<after> (Δ<+/-N>)"`.
+   Screenshots **must** be a before+after pair (the fix's effect); the command
+   rejects a lone shot. `--file` is only for a supplementary screen recording.
 
 If it's truly too risky / ambiguous / unreproducible / unverifiable, do **not**
 open a PR — report `blocked` with the reason (the orchestrator will `issue escalate`).

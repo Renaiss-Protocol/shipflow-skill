@@ -2087,18 +2087,40 @@ var {
 } = import__.default;
 
 // src/config.ts
-import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
-var CONFIG_DIR = join(homedir(), ".config", "renaissshipflow");
-var CONFIG_FILE = join(CONFIG_DIR, "config.json");
-var CREDS_FILE = join(CONFIG_DIR, "credentials.json");
-var PROJECTS_FILE = join(CONFIG_DIR, "projects.json");
+var DEFAULT_BASE = join(homedir(), ".config", "renaissshipflow");
+function baseConfigDir() {
+  return process.env.SHIPFLOW_CONFIG_DIR || DEFAULT_BASE;
+}
+function activeProfile() {
+  return (process.env.SHIPFLOW_PROFILE ?? "").trim();
+}
+function configDir() {
+  const profile = activeProfile();
+  return profile ? join(baseConfigDir(), "profiles", profile) : baseConfigDir();
+}
+var configFile = () => join(configDir(), "config.json");
+var credsFile = () => join(configDir(), "credentials.json");
+var projectsFile = () => join(configDir(), "projects.json");
+function listProfiles() {
+  try {
+    return readdirSync(join(baseConfigDir(), "profiles"), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
+  } catch {
+    return [];
+  }
+}
+function credentialsForProfile(name) {
+  const dir = name ? join(baseConfigDir(), "profiles", name) : baseConfigDir();
+  return readJsonOr(join(dir, "credentials.json"), null);
+}
 var MERGE_POLICIES = ["manual", "auto-on-green", "auto-timeout"];
 function ensureDir() {
-  if (!existsSync(CONFIG_DIR)) {
-    mkdirSync(CONFIG_DIR, { recursive: true, mode: 448 });
+  const dir = configDir();
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true, mode: 448 });
   }
 }
 function readJsonOr(path, fallback) {
@@ -2116,23 +2138,23 @@ function writeJson(path, value) {
     mode: 384
   });
 }
-var loadConfig = () => readJsonOr(CONFIG_FILE, {});
-var saveConfig = (c) => writeJson(CONFIG_FILE, c);
+var loadConfig = () => readJsonOr(configFile(), {});
+var saveConfig = (c) => writeJson(configFile(), c);
 var clearConfig = () => {
   try {
-    unlinkSync(CONFIG_FILE);
+    unlinkSync(configFile());
   } catch {}
 };
-var loadCredentials = () => readJsonOr(CREDS_FILE, null);
-var saveCredentials = (c) => writeJson(CREDS_FILE, c);
+var loadCredentials = () => readJsonOr(credsFile(), null);
+var saveCredentials = (c) => writeJson(credsFile(), c);
 function refreshOpts(creds) {
   return {
     refreshToken: creds.refreshToken,
     onRefreshed: (t) => saveCredentials({ ...creds, jwt: t.token, refreshToken: t.refreshToken, expiresAt: t.expiresAt })
   };
 }
-var loadProjectCache = () => readJsonOr(PROJECTS_FILE, {});
-var saveProjectCache = (c) => writeJson(PROJECTS_FILE, c);
+var loadProjectCache = () => readJsonOr(projectsFile(), {});
+var saveProjectCache = (c) => writeJson(projectsFile(), c);
 function projectCacheKeyForRepoPath(absRepoRoot) {
   return createHash("sha256").update(absRepoRoot).digest("hex").slice(0, 16);
 }
@@ -2181,8 +2203,8 @@ function resolveMaxFixAttempts() {
 function resolveWipLimit() {
   const env = process.env.SHIPFLOW_WIP_LIMIT;
   if (env != null && env !== "")
-    return parseIntOr(env, 3);
-  return parseIntOr(loadConfig().wipLimit, 3);
+    return parseIntOr(env, 10);
+  return parseIntOr(loadConfig().wipLimit, 10);
 }
 function resolveStalePrHours() {
   const env = process.env.SHIPFLOW_STALE_PR_HOURS;
@@ -2407,9 +2429,13 @@ class ShipFlowClient {
       form.set("previewUrl", opts.previewUrl);
     if (opts.caption)
       form.set("caption", opts.caption);
-    for (const img of opts.images) {
-      form.append("images", new Blob([img.data]), img.filename);
-    }
+    const appendAll = (field, imgs) => {
+      for (const img of imgs ?? [])
+        form.append(field, new Blob([img.data]), img.filename);
+    };
+    appendAll("before", opts.before);
+    appendAll("after", opts.after);
+    appendAll("images", opts.images);
     const headers = {};
     if (this.apiKey)
       headers["Authorization"] = `Bearer ${this.apiKey}`;
@@ -2850,9 +2876,13 @@ function ghIssueView(repo, number) {
   const out = _exec(`gh issue view ${number} --repo ${shellQuote(repo)} --json ${FIELDS}`).toString();
   return JSON.parse(out);
 }
+var SHIPFLOW_TRIAGED_MARKER = "<!-- shipflow:triaged -->";
 function ghIssueCreate(repo, title, body, labels = []) {
   const labelFlags = labels.map((l) => `--label ${shellQuote(l)}`).join(" ");
-  const out = _exec(`gh issue create --repo ${shellQuote(repo)} --title ${shellQuote(title)} --body ${shellQuote(body)} ${labelFlags}`).toString();
+  const bodyWithMarker = body.includes(SHIPFLOW_TRIAGED_MARKER) ? body : `${body.replace(/\n+$/, "")}
+
+${SHIPFLOW_TRIAGED_MARKER}`;
+  const out = _exec(`gh issue create --repo ${shellQuote(repo)} --title ${shellQuote(title)} --body ${shellQuote(bodyWithMarker)} ${labelFlags}`).toString();
   const url = out.split(`
 `).map((s) => s.trim()).filter(Boolean).reverse().find((l) => l.startsWith("http")) ?? out.trim();
   const number = parseInt(url.split("/").pop() || "0", 10);
@@ -2881,9 +2911,20 @@ function ghPRMerge(repo, number, mode = "squash", deleteBranch = true) {
   if (deleteBranch)
     flags.push("--delete-branch");
   _exec(`gh pr merge ${number} --repo ${shellQuote(repo)} ${flags.join(" ")}`, { stdio: "inherit" });
-  const view = _exec(`gh pr view ${number} --repo ${shellQuote(repo)} --json mergeCommit`).toString();
+  const view = _exec(`gh pr view ${number} --repo ${shellQuote(repo)} --json mergeCommit,headRefName`).toString();
   const parsed = JSON.parse(view);
-  return { mergedSha: parsed.mergeCommit?.oid ?? "" };
+  return { mergedSha: parsed.mergeCommit?.oid ?? "", headBranch: parsed.headRefName ?? "" };
+}
+function cleanupMergedLocalBranch(headBranch) {
+  if (!headBranch)
+    return;
+  try {
+    const current = _exec("git rev-parse --abbrev-ref HEAD").toString().trim();
+    if (current === headBranch) {
+      _exec("git checkout --detach", { stdio: "ignore" });
+    }
+    _exec(`git branch -D ${shellQuote(headBranch)}`, { stdio: "ignore" });
+  } catch {}
 }
 var PR_FIELDS = "number,title,headRefName,baseRefName,url,isDraft,reviewDecision,mergeable,labels,reviews,comments,statusCheckRollup,closingIssuesReferences,createdAt,updatedAt";
 function ghPRListMine(repo, limit = 30) {
@@ -2923,6 +2964,20 @@ function ghIssueRemoveLabel(repo, number, label) {
 }
 function ghIssueComment(repo, number, body) {
   _exec(`gh issue comment ${number} --repo ${shellQuote(repo)} --body ${shellQuote(body)}`, { stdio: "ignore" });
+}
+function formatEscalationBody(reason) {
+  const why = reason.trim() || "_No reason given._";
+  return [
+    "\uD83D\uDEA7 **Needs a human** — the ShipFlow loop escalated this and is skipping it for now.",
+    "",
+    "### Why it's blocked",
+    "",
+    why,
+    "",
+    "---",
+    "<sub>The loop kept its work lock, so it won't re-pick this issue until a human acts. Resolve the question above, then remove the **`needs-human`** label to let the loop back in.</sub>"
+  ].join(`
+`);
 }
 function ghReviewThreads(repo, number) {
   const [owner, name] = repo.split("/");
@@ -3014,7 +3069,13 @@ function registerLoginCommand(program2) {
     cfg.defaultOrg = chosen.tenant.githubOrg;
     cfg.apiUrl = apiUrl;
     saveConfig(cfg);
-    console.log(`Signed in as @${process.env.USER ?? "you"} for ${chosen.tenant.displayName} (${apiUrl}).`);
+    const profile = activeProfile();
+    const where = profile ? ` [profile: ${profile}]` : "";
+    console.log(`Signed in as @${process.env.USER ?? "you"} for ${chosen.tenant.displayName} (${apiUrl})${where}.`);
+    if (!profile && result.tenants.length > 1) {
+      console.log(`Tip: you belong to multiple tenants — keep them side by side with profiles, e.g.
+` + `  renaiss-shipflow --profile ${chosen.tenant.githubOrg} login`);
+    }
   });
 }
 
@@ -3201,6 +3262,29 @@ function sortIssuesForPickup(issues) {
   });
 }
 
+// src/evidence.ts
+var IMAGE_EXTS = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"];
+function isImagePath(p) {
+  const lower = p.toLowerCase();
+  return IMAGE_EXTS.some((e) => lower.endsWith(e));
+}
+function validateEvidenceSelection(before, after, misc) {
+  const hasBefore = before.length > 0;
+  const hasAfter = after.length > 0;
+  if (hasBefore !== hasAfter) {
+    return "Provide BOTH --before and --after: a screenshot before the fix and one after, so the fix's effect is visible.";
+  }
+  if (!hasBefore && !hasAfter) {
+    if (misc.some(isImagePath)) {
+      return "Screenshot evidence must show the fix — pass --before <img> and --after <img>. (--file is only for video or extra media.)";
+    }
+    if (misc.length === 0) {
+      return "Nothing to attach. Provide --before and --after screenshots (and optionally --file for a screen recording).";
+    }
+  }
+  return null;
+}
+
 // src/commands/issue.ts
 var IN_PROGRESS_LABEL = "\uD83E\uDD16 in-progress";
 var NEEDS_HUMAN_LABEL = "needs-human";
@@ -3301,9 +3385,7 @@ function registerIssueCommand(program2) {
     ghIssueAddLabels(repo, number, [NEEDS_HUMAN_LABEL]);
     if (!opts.keepInProgress)
       ghIssueRemoveLabel(repo, number, IN_PROGRESS_LABEL);
-    ghIssueComment(repo, number, `\uD83D\uDEA7 **Needs a human** — the ShipFlow loop escalated this.
-
-${reason || "_No reason given._"}`);
+    ghIssueComment(repo, number, formatEscalationBody(reason));
     let released = false;
     if (opts.release) {
       try {
@@ -3319,25 +3401,27 @@ ${reason || "_No reason given._"}`);
     }
     console.log(`\uD83D\uDEA7 #${number} escalated → labelled "${NEEDS_HUMAN_LABEL}"${released ? " and claim released" : " (claim kept — loop skips it this run)"}.`);
   });
-  issue.command("evidence <number>").description("Attach testing screenshots/video (reporter thread + a comment on the PR, or the issue if no --pr)").option("--image <path...>", "Screenshot file(s)").option("--file <path...>", "Any media file(s) — screenshots or video (mp4/mov/webm)").option("--pr <n>", "Related PR number — when set, the evidence comment lands on the PR instead of the issue").option("--preview-url <url>", "Testing site URL").option("--caption <text>", "Short note shown with the evidence").option("--repo <fullname>", "Override target repo").option("--json", "Output JSON").action(async (numberStr, opts) => {
-    const paths = [...opts.file ?? [], ...opts.image ?? []];
-    if (!paths.length) {
-      console.error("At least one --file (or --image) is required.");
+  issue.command("evidence <number>").description("Attach testing evidence. Screenshots must show the fix: --before AND --after (reporter thread + a PR comment, or the issue if no --pr)").option("--before <path...>", "Screenshot(s) BEFORE the fix (required for screenshot evidence)").option("--after <path...>", "Screenshot(s) AFTER the fix (required for screenshot evidence)").option("--image <path...>", "Extra screenshot file(s) — prefer --before/--after").option("--file <path...>", "Supplementary media — a screen recording (mp4/mov/webm) or extra files").option("--pr <n>", "Related PR number — when set, the evidence comment lands on the PR instead of the issue").option("--preview-url <url>", "Testing site URL").option("--caption <text>", "Short note shown with the evidence").option("--repo <fullname>", "Override target repo").option("--json", "Output JSON").action(async (numberStr, opts) => {
+    const before = opts.before ?? [];
+    const after = opts.after ?? [];
+    const misc = [...opts.file ?? [], ...opts.image ?? []];
+    const selErr = validateEvidenceSelection(before, after, misc);
+    if (selErr) {
+      console.error(selErr);
       process.exit(1);
     }
     const ctx = await loadCtx(program2);
     const number = parseInt(numberStr, 10);
     const repo = opts.repo ?? ctx.project.repoFullName;
-    const images = paths.slice(0, 4).map((p) => ({
-      filename: basename(p),
-      data: new Uint8Array(readFileSync2(p))
-    }));
+    const toImg = (p) => ({ filename: basename(p), data: new Uint8Array(readFileSync2(p)) });
     const res = await ctx.client.attachEvidence(ctx.creds.org, ctx.project.projectId, number, {
       repo,
       pr: opts.pr ? parseInt(opts.pr, 10) : undefined,
       previewUrl: opts.previewUrl,
       caption: opts.caption,
-      images
+      before: before.map(toImg),
+      after: after.map(toImg),
+      images: misc.map(toImg)
     });
     if (opts.json) {
       console.log(JSON.stringify(res, null, 2));
@@ -3679,7 +3763,7 @@ var SETTINGS = [
   {
     key: "wip-limit",
     field: "wipLimit",
-    set: (v, c) => String(c.wipLimit = parseIntOr(v, 3)),
+    set: (v, c) => String(c.wipLimit = parseIntOr(v, 10)),
     effective: resolveWipLimit
   },
   {
@@ -3815,6 +3899,8 @@ ${opts.body ?? ""}`;
     const ctx = await loadCtx2(program2);
     const number = parseInt(numberStr, 10);
     const result = ghPRMerge(ctx.project.repoFullName, number, opts.mode, !opts.keepBranch);
+    if (!opts.keepBranch)
+      cleanupMergedLocalBranch(result.headBranch);
     try {
       await ctx.client.signal(ctx.creds.org, ctx.project.projectId, "prs", number, "merged", {
         repo: ctx.project.repoFullName,
@@ -3872,6 +3958,7 @@ ${opts.body ?? ""}`;
       process.exit(5);
     }
     const result = ghPRMerge(repo, number, opts.mode ?? "squash", true);
+    cleanupMergedLocalBranch(result.headBranch);
     try {
       await ctx.client.signal(ctx.creds.org, ctx.project.projectId, "prs", number, "merged", { repo, mergedSha: result.mergedSha });
     } catch (e) {
@@ -4138,10 +4225,60 @@ function safeLatestTag() {
   }
 }
 
+// src/commands/profile.ts
+function rows() {
+  const active = activeProfile();
+  return ["", ...listProfiles()].map((name) => {
+    const creds = credentialsForProfile(name);
+    return {
+      profile: name,
+      active: name === active,
+      signedIn: !!creds?.jwt,
+      org: creds?.org ?? "",
+      tenantId: creds?.tenantId ?? ""
+    };
+  });
+}
+function registerProfilesCommand(program2) {
+  const profiles = program2.command("profiles").description("List config profiles (isolated credentials per tenant)").option("--json", "Output JSON").action((opts) => {
+    const active = activeProfile();
+    const data = rows();
+    if (opts.json) {
+      console.log(JSON.stringify({ active: active || null, dir: configDir(), profiles: data }, null, 2));
+      return;
+    }
+    console.log(`Active profile: ${active || "(default)"}`);
+    console.log(`Config dir:     ${configDir()}`);
+    console.log("");
+    console.log("   Profile         Signed in  Org                   Tenant");
+    console.log("   --------------  ---------  --------------------  --------------------------");
+    for (const r of data) {
+      const mark = r.active ? "*" : " ";
+      const name = (r.profile || "(default)").padEnd(14);
+      const si = (r.signedIn ? "yes" : "no").padEnd(9);
+      const org = (r.org || "—").padEnd(20);
+      console.log(` ${mark} ${name}  ${si}  ${org}  ${r.tenantId || "—"}`);
+    }
+    if (data.filter((r) => r.signedIn).length < 2) {
+      console.log("");
+      console.log("Add a tenant in its own store:");
+      console.log("  renaiss-shipflow --profile <name> login   (or SHIPFLOW_PROFILE=<name> renaiss-shipflow login)");
+    }
+  });
+  profiles.command("dir").description("Print the active config directory (honors --profile / SHIPFLOW_PROFILE / SHIPFLOW_CONFIG_DIR)").action(() => {
+    console.log(configDir());
+  });
+}
+
 // src/index.ts
 var pkg = createRequire2(import.meta.url)("../package.json");
 var program2 = new Command;
-program2.name("renaiss-shipflow").description("CLI for RenaissShipFlow - AI-powered project management automation").version(pkg.version).option("--api-url <url>", "RenaissShipFlow API base URL").option("--org <org>", 'Organization slug (default: "default")', "default");
+program2.name("renaiss-shipflow").description("CLI for RenaissShipFlow - AI-powered project management automation").version(pkg.version).option("--api-url <url>", "RenaissShipFlow API base URL").option("--org <org>", 'Organization slug (default: "default")', "default").option("--profile <name>", "Config profile — isolated credentials per tenant (also SHIPFLOW_PROFILE)");
+program2.hook("preAction", () => {
+  const p = program2.opts().profile;
+  if (p)
+    process.env.SHIPFLOW_PROFILE = p;
+});
 registerAuthCommands(program2);
 registerRepoCommands(program2);
 registerWorkflowCommands(program2);
@@ -4162,4 +4299,5 @@ registerPRCommand(program2);
 registerTestCommand(program2);
 registerRegressionCommand(program2);
 registerReleaseCommand(program2);
+registerProfilesCommand(program2);
 program2.parse();

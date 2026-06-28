@@ -95,11 +95,14 @@ see the verification inline — pass the PR number with `--pr`, and put the heal
 delta in the caption (the reviewer and merge gate read it):
 
 ```bash
-renaiss-shipflow issue evidence <n> --pr <pr> --file "$EV/after.png" \
+renaiss-shipflow issue evidence <n> --pr <pr> \
+  --before "$EV/before.png" --after "$EV/after.png" \
   --caption "Verified: <what you tested> · health <before>→<after> (Δ<+/-N>) · 0 new console errors"
 ```
 
-With `--pr`, the comment lands on the PR (plus the reporter's chat thread); the
-issue stays linked through the PR's `Fixes #<n>`. Without a PR, it falls back to an
-issue comment. Attach a short screen recording instead/as well for flows that need
-motion (`--file demo.mp4`).
+Screenshot evidence **must** include both `--before` and `--after` — they render
+under "Before the fix" / "After the fix" so the change is visible (the command
+rejects a lone before or after). With `--pr`, the comment lands on the PR (plus
+the reporter's chat thread); the issue stays linked through the PR's `Fixes #<n>`.
+Without a PR, it falls back to an issue comment. Attach a short screen recording
+as well for flows that need motion (`--file demo.mp4`).
