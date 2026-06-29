@@ -2965,8 +2965,28 @@ function ghIssueRemoveLabel(repo, number, label) {
 function ghIssueComment(repo, number, body) {
   _exec(`gh issue comment ${number} --repo ${shellQuote(repo)} --body ${shellQuote(body)}`, { stdio: "ignore" });
 }
+function bulletizeReason(reason) {
+  if (reason.includes(`
+`))
+    return reason;
+  const parts = reason.split(/\s*\((\d+)\)\s*/).filter((s) => s.length > 0);
+  if (parts.length < 3)
+    return reason;
+  const lead = /^\d+$/.test(parts[0]) ? "" : parts.shift().trim();
+  if (parts[0] !== "1")
+    return reason;
+  const items = [];
+  for (let i = 0;i + 1 < parts.length; i += 2) {
+    items.push(`${parts[i]}. ${parts[i + 1].replace(/[;.\s]+$/, "").trim()}`);
+  }
+  return lead ? `${lead}
+
+${items.join(`
+`)}` : items.join(`
+`);
+}
 function formatEscalationBody(reason) {
-  const why = reason.trim() || "_No reason given._";
+  const why = bulletizeReason(reason.trim()) || "_No reason given._";
   return [
     "\uD83D\uDEA7 **Needs a human** — the ShipFlow loop escalated this and is skipping it for now.",
     "",
@@ -3239,6 +3259,22 @@ import { readFileSync as readFileSync2 } from "node:fs";
 import { basename } from "node:path";
 
 // src/issue-order.ts
+var NEEDS_HUMAN_LABEL = "needs-human";
+var IN_PROGRESS_LABEL = "\uD83E\uDD16 in-progress";
+function isActionableForPickup(issue, filter) {
+  if (filter.claimed)
+    return false;
+  const labels = issue.labels.map((l) => l.name);
+  if (labels.includes(NEEDS_HUMAN_LABEL))
+    return false;
+  if (labels.includes(IN_PROGRESS_LABEL))
+    return false;
+  if (filter.label && !labels.includes(filter.label))
+    return false;
+  if (filter.assignee && !issue.assignees.some((a) => a.login === filter.assignee))
+    return false;
+  return true;
+}
 var PRIORITY_RANK = { critical: 4, high: 3, medium: 2, low: 1 };
 var SEVERITY_RANK = { blocking: 4, major: 3, minor: 2, cosmetic: 1 };
 function labelRank(labels, prefix, ranks) {
@@ -3286,8 +3322,6 @@ function validateEvidenceSelection(before, after, misc) {
 }
 
 // src/commands/issue.ts
-var IN_PROGRESS_LABEL = "\uD83E\uDD16 in-progress";
-var NEEDS_HUMAN_LABEL = "needs-human";
 function registerIssueCommand(program2) {
   const issue = program2.command("issue").description("Issue actions");
   issue.command("create").description("Open a new issue (and signal ShipFlow)").option("--repo <fullname>", "Override target repo").option("--title <title>", "Issue title").option("--body <body>", "Issue body (- for stdin)").option("--label <name...>", "Label(s) to apply (created if missing) — e.g. bug auto-qa").option("--json", "Output JSON").action(async (opts) => {
@@ -3334,15 +3368,7 @@ function registerIssueCommand(program2) {
     const open = ghIssueList(repo, "open", 50);
     const claims = await ctx.client.listClaims(ctx.creds.org, ctx.project.projectId).catch(() => []);
     const claimed = new Set(claims.filter((c) => c.repo === repo).map((c) => c.issueNumber));
-    const matching = open.filter((i) => {
-      if (claimed.has(i.number))
-        return false;
-      if (opts.label && !i.labels.some((l) => l.name === opts.label))
-        return false;
-      if (opts.assignee && !i.assignees.some((a) => a.login === opts.assignee))
-        return false;
-      return true;
-    });
+    const matching = open.filter((i) => isActionableForPickup(i, { claimed: claimed.has(i.number), label: opts.label, assignee: opts.assignee }));
     const candidates = sortIssuesForPickup(matching);
     for (const cand of candidates) {
       try {

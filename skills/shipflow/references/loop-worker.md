@@ -41,8 +41,11 @@ data in your context, not the orchestrator's.
    not "it renders". Run just that file; commit it with the fix. Skip only for
    pure-CSS changes or when the project genuinely has no test framework (note it in
    the return). An autonomous fix with no regression test silently regresses later.
-5. **PR** — commit, push, `renaiss-shipflow pr create --json` (body `Fixes #<n>`).
-   `pr create` references the issue via `Closes #N` (a link, not a copy of the issue).
+5. **PR** — commit, push, `renaiss-shipflow pr create --json`. **Full fix** → body
+   `Fixes #<n>`; the `Closes #N` link (a reference, not a copy) closes the issue on
+   merge. **Partial slice** (the brief covered only part of the issue) → body
+   `Part of #<n>` — a plain reference, **no** closing keyword — so merging your slice
+   leaves the parent open for the deferred follow-ups.
 6. **Evidence** — `renaiss-shipflow issue evidence <n> --pr <pr> --before <before.png>
    --after <after.png> --caption "Verified: <what> · health <before>→<after> (Δ<+/-N>)"`.
    Screenshots **must** be a before+after pair (the fix's effect); the command
@@ -66,7 +69,8 @@ wall) — this, not a stop-hook, is what makes the result trustworthy:
       noted why it was skipped: pure-CSS / no test framework).
 - [ ] The change stayed inside the feature's paths (or you flagged a neighbour touch),
       and **no neighbour page's health score dropped**.
-- [ ] PR opened with `Fixes #<n>` and evidence (with health delta) attached to the PR.
+- [ ] PR opened linking the issue — `Fixes #<n>` for a full fix, `Part of #<n>` for a
+      partial slice (no closing keyword) — and evidence (with health delta) attached.
 - [ ] You only set `blocked: true` after honestly trying to reproduce, start the dev
       server, seed a test DB, and read git history — never on first friction.
 

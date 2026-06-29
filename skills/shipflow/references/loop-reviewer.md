@@ -16,14 +16,34 @@ paths/layers (those are the regression risk).
 
 ## Mode 1 — issue intake (before any worker touches it)
 Input: the issue + its `triage`. Produce an **acceptance brief**:
-1. **Valid?** Real, actionable, not a duplicate of an open issue, not missing
-   info. If not → verdict `reject` with a reason (orchestrator escalates). Write
-   the reason **scannably** — a one-line TL;DR, then short bullets (what's
+0. **Human override? — check first.** If the issue carries the `loop-proceed` label
+   (or a human posted a "proceed / go ahead / just work on it" comment *after* a loop
+   escalation), a human has already green-lit the work: **skip the validity-reject
+   entirely** — never re-`reject` a `loop-proceed` issue. Go straight to feature
+   mapping + an acceptance brief for the **smallest sensible slice**. The override is
+   authoritative and sticky across re-picks (see `loop-mode.md`, the human-reply rule).
+1. **Valid? — `reject` only for a hard blocker.** A `reject` verdict escalates the
+   issue to `needs-human`, so reserve it for what the loop genuinely **cannot** do
+   autonomously: missing secrets/credentials or external setup the loop can't
+   perform; a security-/trust-critical surface that can't be validated without a
+   human; an absent spec/design doc the issue depends on; a hard dependency on an
+   unmerged issue; or a genuine duplicate/invalid issue. Otherwise, proceed. Write
+   any reject reason **scannably** — a one-line TL;DR, then short bullets (what's
    blocked · what *was* decidable · the human decision needed) — not a dense
    paragraph; it becomes the `issue escalate --reason` a human reads.
-2. **Feature mapping** — which feature(s) from the map this issue touches (by path
+2. **Too big or ambiguous? — scope down, don't refuse.** An issue that's merely
+   large, open-ended, ambiguous, or internally contradictory is **not** grounds to
+   escalate. Carve the smallest **bounded, value-adding slice** you can confidently
+   accept and write the acceptance brief for *that* slice. **Return the deferred
+   parts** in your payload as recommended follow-up sub-issues — the orchestrator
+   files them at admit time (see `loop-mode.md`, Phase B step 2). Mark a sliced brief
+   **partial**: the slice PR must link the parent with **`Part of #N`** (a plain
+   reference), **not** a closing keyword (`Closes #N` / `Fixes #N`), so merging the
+   slice doesn't auto-close the still-open parent. Only `reject` when there is truly
+   no safe slice that adds value.
+3. **Feature mapping** — which feature(s) from the map this issue touches (by path
    overlap with `triage.relatedFiles` + description). Note cross-feature blast radius.
-3. **Acceptance criteria** — what "done" means, and which features to
+4. **Acceptance criteria** — what "done" means, and which features to
    regression-check given the blast radius.
 
 ## Mode 2 — PR review (before merge)
@@ -38,7 +58,9 @@ Input: the PR number + the acceptance brief. Pull `features --json` and the diff
    handing the orchestrator each thread to fix. External reviewers post a minute or
    two *after* the PR opens, so if none have appeared yet, don't rush an approval —
    let the next reconcile tick catch them.
-1. **Meets the brief?** Does the change satisfy the acceptance criteria.
+1. **Meets the brief?** Does the change satisfy the acceptance criteria. If the brief
+   was a **partial slice**, confirm the PR links `Part of #N` (not a closing keyword),
+   so merging it leaves the parent issue open for the deferred follow-ups.
 2. **Cross-feature impact** — does it touch paths owned by features *other* than
    the target? Could a co-located / shared-layer feature regress? Call those out.
 3. **Correctness / safety** — obvious bugs, **a missing regression test** for the

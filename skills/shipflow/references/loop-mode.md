@@ -132,12 +132,21 @@ A PR becomes `approved_ready` **only** because the reviewer approved it — neve
 hand-add `shipflow-approved`. For each in-progress issue with a `newComment`, a
 worker reads + acts. **A human reply on a `needs-human` issue** — a new comment from
 a person, i.e. not one of the loop's own `🚧 **Needs a human**` / evidence comments —
-is the **decision that unblocks it**: remove the `needs-human` label, bake the
-human's guidance into the acceptance brief as a settled decision, and hand it
-straight to a worker (Phase B step 3); the reviewer then gates the resulting PR
-(step 4). Do **not** re-run the intake validity gate or re-escalate the question the
-human just answered. (A reply that's only a question/chatter with no decision stays
-escalated.)
+is the **decision that unblocks it**. A reply that says **"proceed / go ahead / just
+work on it / do it"** (or otherwise green-lights the work) is an **authoritative,
+sticky override**: it **overrules the reviewer's prior `reject`**. Remove the
+`needs-human` label **and add the durable marker label `loop-proceed`** — that label
+is the override's persistent record, the one signal a **fresh-context** reviewer can
+read on any later re-pick (an in-head "settled decision" doesn't survive a new
+subagent or a restart; the label does). Then bake the human's guidance into the
+acceptance brief, and hand it straight to a worker (Phase B step 3) — carving the
+smallest sensible slice if the issue is big, rather than asking again; the reviewer
+then gates the resulting PR (step 4). Do **not** re-run the intake validity gate, and
+**never re-escalate that issue for the same reason** — the override is sticky **across
+re-picks**, not just within this tick: even if the issue later re-enters via
+`issue next`, the `loop-proceed` label makes the reviewer's intake (Mode 1) skip the
+validity-reject and go straight to the brief. (A reply that's only a question/chatter
+with no decision stays escalated.)
 
 ### B. Admit new work — under the WIP limit, every issue reviewed first
 
@@ -154,7 +163,10 @@ PRs-opened-this-run < `cap`, admit ONE issue — each step a fresh subagent:
    validates the issue, maps it to the features it touches, and returns an
    **acceptance brief** (what "done" means + which features to regression-check).
    Reviewer rejects (invalid / duplicate / needs a human) → `issue escalate` and
-   pick the next. See `references/loop-reviewer.md`.
+   pick the next. **If the brief is a partial slice with deferred parts, file each as
+   a follow-up sub-issue now** — `renaiss-shipflow issue create --title "…" --body
+   "Part of #<n>: …"` — *before* dispatching the worker, so deferred scope is tracked,
+   not dropped. See `references/loop-reviewer.md`.
 3. **Worker — fix** Dispatch the worker subagent with the issue + triage + brief.
    It pulls the **feature map** itself (`features --json`) for file boundaries +
    neighbouring features, so the heavy data stays in its context, not yours. In
@@ -162,7 +174,8 @@ PRs-opened-this-run < `cap`, admit ONE issue — each step a fresh subagent:
    fixes, runs project tests **and** a diff-scoped E2E browser pass with before/after
    screenshots + a **health score** (`references/browser-testing.md`), **adds a
    regression test** for the bug, opens the PR with `renaiss-shipflow pr create --json`
-   (which **links the issue via `Closes #N`** — a reference, not a copy of the issue),
+   (a **full fix** links `Closes #N` to close the issue on merge; a **partial slice**
+   links `Part of #N` — no closing keyword — leaving the parent open for follow-ups),
    and attaches evidence with the health delta (`issue evidence <n> --pr <pr> --file …`).
    Returns `{pr, verified, regressionTest, healthDelta, blocked}`. Unverified/blocked
    → `issue escalate`, no PR.
@@ -251,9 +264,19 @@ else `SHIPFLOW_LOOP_CAP`, else **5**.
   `merge-policy`. With the default `manual` it never merges; approved PRs pile up
   cleanly for a human. **Never** call bare `pr merge` or cut a `release` without
   explicit human confirmation.
-- **Escalate, don't spin.** A single hard/blocked/unverifiable item →
-  `issue escalate` (labels `needs-human`, keeps the claim, comments why) and move
-  on. It never ends the run; you never pause mid-run to ask for direction.
+- **Escalate, don't spin — but split before you escalate.** Escalation is a **last
+  resort**, not the default for "this is big." For an item that's merely large,
+  open-ended, or ambiguous, **carve a bounded, value-adding slice** and defer the
+  rest as follow-up sub-issues — the **orchestrator** files those with
+  `renaiss-shipflow issue create` linked to the parent (`Part of #N`) at admit time,
+  before the slice PR opens — rather than handing the whole thing to a human.
+  Reserve `issue escalate` for a genuine **hard blocker** — missing
+  secrets/credentials or external setup the loop can't do, a security-/trust-critical
+  surface that can't be validated autonomously, an absent spec/design doc the issue
+  depends on, a hard dependency on an unmerged issue, or a duplicate/invalid issue.
+  A single hard/blocked/unverifiable item → `issue escalate` (labels `needs-human`,
+  keeps the claim, comments why) and move on. It never ends the run; you never pause
+  mid-run to ask for direction.
   Write `--reason` to be **read by a human**, not as a dense paragraph: lead with
   a one-line TL;DR, then a few short bullets (what's blocked · what *was*
   decidable · the decision you need). `issue escalate` adds the heading + the
