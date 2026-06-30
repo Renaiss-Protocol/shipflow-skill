@@ -2846,6 +2846,8 @@ function registerTriggerCommand(program2) {
 
 // src/gh.ts
 import { execSync, spawnSync } from "node:child_process";
+import { realpathSync } from "node:fs";
+import { basename } from "node:path";
 var FIELDS = "number,title,body,state,labels,assignees,url,createdAt";
 var _exec = execSync;
 var _spawn = spawnSync;
@@ -2915,15 +2917,52 @@ function ghPRMerge(repo, number, mode = "squash", deleteBranch = true) {
   const parsed = JSON.parse(view);
   return { mergedSha: parsed.mergeCommit?.oid ?? "", headBranch: parsed.headRefName ?? "" };
 }
+function parseWorktrees(porcelain) {
+  const records = [];
+  let cur = null;
+  const flush = () => {
+    if (cur)
+      records.push({ ...cur, isMain: records.length === 0 });
+  };
+  for (const raw of porcelain.split(`
+`)) {
+    const line = raw.trim();
+    if (line.startsWith("worktree ")) {
+      flush();
+      cur = { path: line.slice("worktree ".length).trim(), branch: null };
+    } else if (line.startsWith("branch ") && cur) {
+      cur.branch = line.slice("branch ".length).trim();
+    }
+  }
+  flush();
+  return records;
+}
 function cleanupMergedLocalBranch(headBranch) {
   if (!headBranch)
     return;
   try {
-    const current = _exec("git rev-parse --abbrev-ref HEAD").toString().trim();
-    if (current === headBranch) {
-      _exec("git checkout --detach", { stdio: "ignore" });
+    const worktrees = parseWorktrees(_exec("git worktree list --porcelain").toString());
+    const held = worktrees.find((w) => w.branch === `refs/heads/${headBranch}`);
+    if (held) {
+      try {
+        const currentTop = _exec("git rev-parse --show-toplevel").toString().trim();
+        const isReusableLoopWorktree = basename(held.path) === "shipflow-loop";
+        const isCurrentCwd = (() => {
+          try {
+            return realpathSync(held.path) === realpathSync(currentTop);
+          } catch {
+            return held.path === currentTop;
+          }
+        })();
+        if (!held.isMain && !isReusableLoopWorktree && !isCurrentCwd) {
+          _exec(`git worktree remove --force ${shellQuote(held.path)}`, { stdio: "ignore" });
+        } else {
+          _exec(`git -C ${shellQuote(held.path)} checkout --detach`, { stdio: "ignore" });
+        }
+      } catch {}
     }
     _exec(`git branch -D ${shellQuote(headBranch)}`, { stdio: "ignore" });
+    _exec("git worktree prune", { stdio: "ignore" });
   } catch {}
 }
 var PR_FIELDS = "number,title,headRefName,baseRefName,url,isDraft,reviewDecision,mergeable,labels,reviews,comments,statusCheckRollup,closingIssuesReferences,createdAt,updatedAt";
@@ -3256,7 +3295,7 @@ function registerIssuesCommand(program2) {
 // src/commands/issue.ts
 import { hostname } from "node:os";
 import { readFileSync as readFileSync2 } from "node:fs";
-import { basename } from "node:path";
+import { basename as basename2 } from "node:path";
 
 // src/issue-order.ts
 var NEEDS_HUMAN_LABEL = "needs-human";
@@ -3439,7 +3478,7 @@ function registerIssueCommand(program2) {
     const ctx = await loadCtx(program2);
     const number = parseInt(numberStr, 10);
     const repo = opts.repo ?? ctx.project.repoFullName;
-    const toImg = (p) => ({ filename: basename(p), data: new Uint8Array(readFileSync2(p)) });
+    const toImg = (p) => ({ filename: basename2(p), data: new Uint8Array(readFileSync2(p)) });
     const res = await ctx.client.attachEvidence(ctx.creds.org, ctx.project.projectId, number, {
       repo,
       pr: opts.pr ? parseInt(opts.pr, 10) : undefined,
