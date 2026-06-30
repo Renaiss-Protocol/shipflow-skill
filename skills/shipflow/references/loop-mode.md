@@ -263,7 +263,10 @@ else `SHIPFLOW_LOOP_CAP`, else **5**.
 - **`pr automerge` is the only merge path the loop uses** — it self-gates on
   `merge-policy`. With the default `manual` it never merges; approved PRs pile up
   cleanly for a human. **Never** call bare `pr merge` or cut a `release` without
-  explicit human confirmation.
+  explicit human confirmation. In a **spawned / headless session** (OpenClaw,
+  Hermes, cron — see SKILL.md "Spawned / headless sessions") no human is there to
+  confirm, so neither runs: `pr automerge` + `merge-policy` is the whole merge
+  story, and `release` is skipped (escalate if a release is genuinely needed).
 - **Escalate, don't spin — but split before you escalate.** Escalation is a **last
   resort**, not the default for "this is big." For an item that's merely large,
   open-ended, or ambiguous, **carve a bounded, value-adding slice** and defer the
@@ -308,7 +311,8 @@ else `SHIPFLOW_LOOP_CAP`, else **5**.
   hand. Releasing escalated claims and any `pr merge`/`release` still need explicit
   confirmation. (That "ask" applies only to a `once`/single-pass run; **by default
   the loop is continuous** — don't ask, post the one-line summary and end the turn,
-  leaving the recurring trigger to resume the next pass after its dormancy.)
+  leaving the recurring trigger to resume the next pass after its dormancy. A
+  **spawned / headless session** never asks either — it reports via prose and ends.)
 - **Continuous mode (default).** `/shipflow-loop` keeps the loop running: one full
   pass, then **dormant ~15 min**, then another pass, indefinitely — so new issues /
   PR-CI changes are picked up without re-invoking. At the start of the run, create a

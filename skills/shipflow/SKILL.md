@@ -87,9 +87,49 @@ requests to the same CLI calls.
   `issue work` output. Show the context and ask how to proceed.
 - Do NOT run `renaiss-shipflow release` or `renaiss-shipflow pr merge` without
   explicit user confirmation — both trigger team-visible downstream workflows.
+  (In a spawned/headless session — see below — there's no human to confirm, so
+  these simply don't run: `merge-policy` governs merges via `pr automerge`, and a
+  `release` is skipped. Never treat the absence of a human as approval.)
 
 These guardrails are deliberately overridden inside Loop mode (see below), which
 the user opts into explicitly.
+
+## Spawned / headless sessions (OpenClaw, Hermes, cron)
+
+ShipFlow is built to run unattended. When this skill is invoked inside a session
+**spawned by an AI orchestrator** — OpenClaw and Hermes spawn Claude Code via ACP —
+or a headless scheduler, **no human is present to answer a prompt**. Detect it at
+the start of the run:
+
+```bash
+# OpenClaw sets $OPENCLAW_SESSION; $CI covers CI/cron; $SHIPFLOW_HEADLESS is an
+# explicit opt-in for any other headless spawner (e.g. Hermes). Deliberately NOT
+# a TTY check (`[ -t 0 ]`): Claude Code's Bash runs non-interactively even when a
+# human is driving, so a TTY test false-positives and would wrongly drop the
+# human-confirmation gates.
+[ -n "$OPENCLAW_SESSION$CI$SHIPFLOW_HEADLESS" ] && echo "SPAWNED_SESSION: true"
+```
+
+Treat any known headless / cron / CI invocation the same way. In a spawned session:
+
+- **Never block waiting for human confirmation.** The policy knobs (`merge-policy`,
+  `require-ci`, `require-review`, `wip-limit`) are the *only* authority.
+  `merge-policy: manual` still **parks** approved PRs for a human — the absence of a
+  human is **not** approval; `auto-on-green` merges per its rules. Bare `pr merge`
+  and `release` need explicit human confirmation a spawned session can't give, so
+  they **don't happen** — park / skip, never auto-merge or release just because
+  no one is watching.
+- **Don't call `AskUserQuestion` or wait for input.** Anywhere this skill would
+  "ask the user" / "ask how to proceed", instead proceed per policy, or
+  `renaiss-shipflow issue escalate <n> --reason "..."` (labels `needs-human`) for a
+  genuine human decision, and keep going. A spawned session resolves ambiguity by **escalating,
+  not pausing**.
+- **Report via prose.** End each pass with a completion report — opened / merged /
+  parked-awaiting-review / escalated (with reasons) + decisions made + anything
+  uncertain — not an interactive summary.
+
+This is the same posture as Loop mode's continuous default; a spawned session just
+makes it mandatory (the interactive "ask whether to continue" never applies).
 
 ## Loop mode
 
