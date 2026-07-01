@@ -34,6 +34,14 @@ data in your context, not the orchestrator's.
    **score** the affected + neighbour pages — `references/qa-report.md`, a dropped
    neighbour score means you regressed it). Pure backend/library changes verify on
    tests alone.
+   - **Branch E2E vs ShipFlow regression E2E.** This browser pass tests *your
+     branch's* code (local dev server) — it's the per-PR gate. ShipFlow's
+     server-side **regression test_runner** (`renaiss-shipflow regression --wait`)
+     is a *complementary* E2E layer that executes API/UI cases against the project's
+     **configured/deployed** environment; the loop runs it in the Phase-C sweep and
+     as a post-deploy gate, not on your branch (per-branch regression awaits per-PR
+     preview deploys + `ref` plumbing — tracked follow-up). So: keep doing the branch
+     browser pass here; don't substitute a `regression` run for it.
 4. **Regression test** — after the fix verifies, **add a test that locks it in**.
    Trace the bug's codepath (what input/state triggered it, which branch broke),
    then write ONE test matching the project's existing style (read 2–3 nearby test

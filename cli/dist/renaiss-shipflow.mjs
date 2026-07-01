@@ -2470,6 +2470,9 @@ class ShipFlowClient {
   async triggerWorkflow(org, projectId, workflowType, inputs) {
     return this.request("POST", `/api/v1/orgs/${encodeURIComponent(org)}/projects/${encodeURIComponent(projectId)}/workflows/${encodeURIComponent(workflowType)}/trigger`, inputs);
   }
+  async getExecutionResult(org, execId) {
+    return this.request("GET", `/api/v1/orgs/${encodeURIComponent(org)}/executions/${encodeURIComponent(execId)}/result`);
+  }
   async getProjectStatus(org, projectId) {
     return this.request("GET", `/api/v1/orgs/${encodeURIComponent(org)}/projects/${encodeURIComponent(projectId)}/status`);
   }
@@ -4231,23 +4234,136 @@ function detectRunner(root) {
 
 // src/commands/regression.ts
 import { execSync as execSync4 } from "node:child_process";
+var REF_RESOLUTION_ERROR = "Failed to resolve git HEAD ref. Ensure you are in a git repository with at least one commit, or pass --ref explicitly.";
+function resolveRef(explicit, runGit = () => execSync4("git rev-parse HEAD", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim()) {
+  if (explicit)
+    return explicit;
+  let ref = "";
+  try {
+    ref = runGit();
+  } catch {
+    throw new Error(REF_RESOLUTION_ERROR);
+  }
+  if (!ref)
+    throw new Error(REF_RESOLUTION_ERROR);
+  return ref;
+}
+var TERMINAL_STATUSES = ["success", "failure", "skipped"];
+function isTerminalStatus(status) {
+  return TERMINAL_STATUSES.includes(status);
+}
+function exitCodeForStatus(status) {
+  return status === "failure" ? 1 : 0;
+}
+function formatResultSummary(res) {
+  const r = res.result ?? {};
+  const status = typeof r.status === "string" ? r.status : "unknown";
+  const lines = [`Regression ${res.executionId}: ${status}`];
+  const counts = [];
+  if (typeof r.passed_tests === "number")
+    counts.push(`${r.passed_tests} passed`);
+  if (typeof r.failed_tests === "number")
+    counts.push(`${r.failed_tests} failed`);
+  if (typeof r.skipped_tests === "number" && r.skipped_tests > 0)
+    counts.push(`${r.skipped_tests} skipped`);
+  if (typeof r.total_tests === "number")
+    counts.push(`${r.total_tests} total`);
+  if (counts.length)
+    lines.push(`  ${counts.join(", ")}`);
+  if (typeof r.errorMessage === "string" && r.errorMessage)
+    lines.push(`  ${r.errorMessage}`);
+  return lines.join(`
+`);
+}
+async function pollUntilTerminal(client, org, execId, opts) {
+  const sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const now = opts.now ?? (() => Date.now());
+  const deadline = now() + opts.timeoutMs;
+  for (;; ) {
+    const result = await client.getExecutionResult(org, execId);
+    const status = String(result.result?.status ?? "");
+    if (isTerminalStatus(status))
+      return { result, timedOut: false };
+    if (now() >= deadline)
+      return { result, timedOut: true };
+    await sleep(opts.intervalMs);
+  }
+}
+async function fetchAndReport(client, org, execId, opts = {}) {
+  const log = opts.log ?? console.log;
+  const res = await client.getExecutionResult(org, execId);
+  if (opts.json)
+    log(JSON.stringify(res));
+  else
+    log(formatResultSummary(res));
+  return exitCodeForStatus(String(res.result?.status ?? ""));
+}
+async function waitAndReport(client, org, execId, opts) {
+  const log = opts.log ?? console.log;
+  const { result, timedOut } = await pollUntilTerminal(client, org, execId, {
+    timeoutMs: opts.timeoutMs,
+    intervalMs: opts.intervalMs,
+    sleep: opts.sleep,
+    now: opts.now
+  });
+  if (opts.json) {
+    log(JSON.stringify(result));
+  } else {
+    log(formatResultSummary(result));
+    if (timedOut)
+      log(`  timed out after ${Math.round(opts.timeoutMs / 1000)}s waiting for a terminal status`);
+  }
+  if (timedOut)
+    return 1;
+  return exitCodeForStatus(String(result.result?.status ?? ""));
+}
 function registerRegressionCommand(program2) {
-  program2.command("regression").description("Trigger ShipFlow's server-side regression test_runner").option("--ref <sha>", "Ref to test (defaults to current HEAD)").option("--json", "Output JSON").action(async (opts) => {
+  const regression = program2.command("regression").description("Trigger ShipFlow's server-side regression test_runner. Exercises the project's " + "configured test environment (per-branch testing needs preview deploys — a separate server change).").option("--ref <sha>", "Ref to test (defaults to current HEAD)").option("--wait", "Poll until the run finishes; exit non-zero on failure or timeout").option("--timeout <sec>", "Max seconds to wait with --wait", "600").option("--json", "Output JSON").action(async (opts) => {
     const auth = resolveAuthToken();
     const creds = loadCredentials();
     if (!auth || !creds) {
       console.error("Not signed in. Run: renaiss-shipflow login");
       process.exit(1);
     }
-    const ref = opts.ref ?? execSync4("git rev-parse HEAD").toString().trim();
+    let ref;
+    try {
+      ref = resolveRef(opts.ref);
+    } catch (e) {
+      console.error(`Error: ${e.message}`);
+      process.exit(1);
+    }
     const client = new ShipFlowClient({ baseUrl: resolveApiUrl(program2.opts().apiUrl), jwt: auth.token, ...refreshOpts(creds) });
     const project = await resolveProject(client, creds);
-    const result = await client.triggerWorkflow(creds.org, project.projectId, "test_runner", { repo: project.repoFullName, ref });
-    if (opts.json) {
-      console.log(JSON.stringify(result));
+    const trigger = await client.triggerWorkflow(creds.org, project.projectId, "test_runner", { repo: project.repoFullName, ref });
+    const execId = trigger.executionId;
+    if (!opts.wait) {
+      if (opts.json) {
+        console.log(JSON.stringify(trigger));
+        return;
+      }
+      console.log(`Regression run queued: ${execId}`);
       return;
     }
-    console.log(`Regression run queued: ${result.runId}`);
+    const timeoutSec = Number(opts.timeout) > 0 ? Number(opts.timeout) : 600;
+    if (!opts.json)
+      console.log(`Regression run queued: ${execId} — waiting up to ${timeoutSec}s...`);
+    const code = await waitAndReport(client, creds.org, execId, {
+      json: opts.json,
+      timeoutMs: timeoutSec * 1000,
+      intervalMs: 5000
+    });
+    process.exit(code);
+  });
+  regression.command("status <executionId>").description("Fetch and print the result of a prior regression run (non-zero exit on failure)").option("--json", "Output JSON").action(async (executionId, opts) => {
+    const auth = resolveAuthToken();
+    const creds = loadCredentials();
+    if (!auth || !creds) {
+      console.error("Not signed in. Run: renaiss-shipflow login");
+      process.exit(1);
+    }
+    const client = new ShipFlowClient({ baseUrl: resolveApiUrl(program2.opts().apiUrl), jwt: auth.token, ...refreshOpts(creds) });
+    const code = await fetchAndReport(client, creds.org, executionId, { json: opts.json });
+    process.exit(code);
   });
 }
 

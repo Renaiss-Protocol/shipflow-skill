@@ -202,8 +202,15 @@ needs action), don't stop yet. If `bug-hunt` is on (`config get bug-hunt`, defau
 **true**), turn the idle time into QA that *refills* the queue:
 
 1. **Sweep methodically** (dispatch a QA subagent so its output stays out of your
-   context) — run `renaiss-shipflow test` and `renaiss-shipflow regression --json`,
-   then a real-browser QA sweep. Use `renaiss-shipflow features --json` to prioritise
+   context) — run `renaiss-shipflow test` and **`renaiss-shipflow regression --wait
+   --json`**. The latter is ShipFlow's own **E2E test_runner**: it *executes* the
+   generated API/UI test cases against the project's configured test environment and
+   blocks until they finish. Gate on the executed result — `--wait` exits non-zero
+   and `result.status` is `failure` when real E2E cases fail; treat each failed test
+   case as a **reproduced bug** to file in step 2 (it already has repro: name +
+   api/ui hint from the run). `success`/`skipped` (or "no test environment
+   configured", where it degrades to a manual checklist only) → no E2E bugs to file.
+   Then a real-browser QA sweep. Use `renaiss-shipflow features --json` to prioritise
    `high` `test_priority` features, and run the **per-page checklist** on each
    (`references/bug-taxonomy.md` §4: click everything, fill forms, check empty/error
    states, console after each interaction, responsive, auth boundaries). Compute the
