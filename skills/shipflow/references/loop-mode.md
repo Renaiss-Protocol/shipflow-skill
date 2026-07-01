@@ -326,12 +326,16 @@ else `SHIPFLOW_LOOP_CAP`, else **5**.
 - **Continuous mode (default).** `/shipflow-loop` keeps the loop running: one full
   pass, then **dormant ~15 min**, then another pass, indefinitely — so new issues /
   PR-CI changes are picked up without re-invoking. At the start of the run, create a
-  recurring trigger (default every 15 min, an off-`:00`/`:30` minute) that re-fires
-  `/shipflow-loop`, then run the first pass now; re-entry is idempotent (a tick sees
-  the existing trigger and skips re-creating it, so they never stack), and each tick
-  is an unattended pass that ends without asking (empty queue is fine — it keeps
-  checking). `/shipflow-loop once` runs a single pass with no trigger; stop an active
-  loop with `/shipflow-loop stop` (delete the trigger), then do the worktree cleanup.
-  The trigger fires only while Claude Code is running/idle and may be session-scoped
-  (cmux) with a ~7-day expiry; for a true always-on reconciler use an external
-  scheduler (cron / launchd / GitHub Actions) driving `/shipflow-loop once`.
+  recurring trigger (default every 15 min, an off-`:00`/`:30` minute) whose prompt is
+  the **fully-qualified** command **`/shipflow:shipflow-loop`** — **not** the bare
+  `/shipflow-loop`, which a scheduler-fired prompt can't resolve (it errors with
+  `Unknown command: /shipflow-loop`). Always use the exact `<plugin>:<command>` form
+  you were invoked as. Then run the first pass now; re-entry is idempotent (a tick
+  sees the existing trigger and skips re-creating it, so they never stack), and each
+  tick is an unattended pass that ends without asking (empty queue is fine — it keeps
+  checking). `/shipflow:shipflow-loop once` runs a single pass with no trigger; stop
+  an active loop with `/shipflow:shipflow-loop stop` (delete the trigger), then do the
+  worktree cleanup. The trigger fires only while Claude Code is running/idle and may
+  be session-scoped (cmux) with a ~7-day expiry; for a true always-on reconciler use
+  an external scheduler (cron / launchd / GitHub Actions) driving
+  `/shipflow:shipflow-loop once`.
