@@ -27,10 +27,22 @@ Input: the issue + its `triage`. Produce an **acceptance brief**:
    autonomously: missing secrets/credentials or external setup the loop can't
    perform; a security-/trust-critical surface that can't be validated without a
    human; an absent spec/design doc the issue depends on; a hard dependency on an
-   unmerged issue; or a genuine duplicate/invalid issue. Otherwise, proceed. Write
-   any reject reason **scannably** — a one-line TL;DR, then short bullets (what's
-   blocked · what *was* decidable · the human decision needed) — not a dense
-   paragraph; it becomes the `issue escalate --reason` a human reads.
+   unmerged issue; or a genuine duplicate/invalid issue. Otherwise, proceed.
+
+   **The `issue escalate --reason` you write IS the comment a human reads — make it
+   act-on-able, not a wall of text.** Point form, short sentences (≤ ~20 words each);
+   no dense paragraphs; no inline `(a)`/`(1)` enumerations — use real markdown lists
+   (numbered steps or bullets). Write it as markdown with these sections, **in this
+   order**:
+   - `### 👤 Action needed` — **lead with this.** The concrete step(s) the human must
+     take, numbered, ending with **"remove the `needs-human` label"** so the loop
+     resumes. A reader should know what to *do* from the first line.
+   - `### Why it's blocked` — 1–4 bullets: the specific blocker + the decision needed.
+   - `### Ready once unblocked` *(if applicable)* — a bullet list of what's already
+     scoped and proceeds after the human acts.
+   Always state an action (at minimum: "remove the `needs-human` label to resume").
+   The escalation comment renders your reason as-is, so these headers are what the
+   human sees — no dense prose reaches the comment.
 2. **Too big or ambiguous? — scope down, don't refuse.** An issue that's merely
    large, open-ended, ambiguous, or internally contradictory is **not** grounds to
    escalate. Carve the smallest **bounded, value-adding slice** you can confidently

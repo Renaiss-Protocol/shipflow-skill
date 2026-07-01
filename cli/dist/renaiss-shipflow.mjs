@@ -3011,16 +3011,24 @@ function bulletizeReason(reason) {
   if (reason.includes(`
 `))
     return reason;
-  const parts = reason.split(/\s*\((\d+)\)\s*/).filter((s) => s.length > 0);
-  if (parts.length < 3)
-    return reason;
-  const lead = /^\d+$/.test(parts[0]) ? "" : parts.shift().trim();
-  if (parts[0] !== "1")
-    return reason;
+  return enumerateReason(reason, /\s*\((\d+)\)\s*/, "1", (m, text) => `${m}. ${text}`) ?? enumerateReason(reason, /\s*\(([a-z])\)\s*/, "a", (_m, text) => `- ${text}`) ?? reason;
+}
+function enumerateReason(reason, marker, firstMarker, line) {
+  const parts = reason.split(marker);
+  if (parts.length < 5)
+    return null;
+  const lead = parts[0].trim();
+  if (parts[1] !== firstMarker)
+    return null;
   const items = [];
-  for (let i = 0;i + 1 < parts.length; i += 2) {
-    items.push(`${parts[i]}. ${parts[i + 1].replace(/[;.\s]+$/, "").trim()}`);
+  for (let i = 1;i + 1 < parts.length; i += 2) {
+    const itemText = parts[i + 1].replace(/[;.\s]+$/, "").trim();
+    if (!itemText)
+      continue;
+    items.push(line(parts[i], itemText));
   }
+  if (items.length < 2)
+    return null;
   return lead ? `${lead}
 
 ${items.join(`
@@ -3031,8 +3039,6 @@ function formatEscalationBody(reason) {
   const why = bulletizeReason(reason.trim()) || "_No reason given._";
   return [
     "\uD83D\uDEA7 **Needs a human** — the ShipFlow loop escalated this and is skipping it for now.",
-    "",
-    "### Why it's blocked",
     "",
     why,
     "",

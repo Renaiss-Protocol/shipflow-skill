@@ -287,10 +287,13 @@ else `SHIPFLOW_LOOP_CAP`, else **5**.
   A single hard/blocked/unverifiable item → `issue escalate` (labels `needs-human`,
   keeps the claim, comments why) and move on. It never ends the run; you never pause
   mid-run to ask for direction.
-  Write `--reason` to be **read by a human**, not as a dense paragraph: lead with
-  a one-line TL;DR, then a few short bullets (what's blocked · what *was*
-  decidable · the decision you need). `issue escalate` adds the heading + the
-  "what happens next" footer around it — so just supply scannable markdown.
+  Write `--reason` to be **read by a human** — point form, short sentences, no dense
+  paragraphs. **Lead with `### 👤 Action needed`** (the concrete steps the human must
+  take as a **numbered** list, ending with "remove the `needs-human` label"), then
+  `### Why it's blocked` and (if useful) `### Ready once unblocked` as **bullets**. See
+  `loop-reviewer.md` Mode 1 for the exact contract. `issue escalate` wraps your
+  markdown with the 🚧 banner + the "what happens next" footer — so supply the
+  action-first sections yourself.
 - Reconcile (A) acts only on **your own** PRs and claimed issues. Don't touch
   others' PRs/issues unless asked.
 - Because blocked/escalated issues keep their claim and carry `needs-human`,
